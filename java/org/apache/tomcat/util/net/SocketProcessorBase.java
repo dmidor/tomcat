@@ -17,14 +17,17 @@
 package org.apache.tomcat.util.net;
 
 import java.util.Objects;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
 public abstract class SocketProcessorBase<S> implements Runnable {
 
+    private static final ConcurrentMap<SocketWrapperBase<?>, Lock> LOCK_CACHE = new ConcurrentHashMap<>();
+
     protected SocketWrapperBase<S> socketWrapper;
     protected SocketEvent event;
-    protected final Lock lock = new ReentrantLock(true);
 
     public SocketProcessorBase(SocketWrapperBase<S> socketWrapper, SocketEvent event) {
         reset(socketWrapper, event);
@@ -40,12 +43,11 @@ public abstract class SocketProcessorBase<S> implements Runnable {
 
     @Override
     public final void run() {
+        // doRun's finally block set this socketWrapper to null, so storing reference locally to be able to clean lock
+        // cache in this method's finally block
+        SocketWrapperBase<?> socketWrapperLocal = socketWrapper;
+        Lock lock = LOCK_CACHE.computeIfAbsent(socketWrapper, (socketWrapperBase -> new ReentrantLock()));
         lock.lock();
-        // It is possible that processing may be triggered for read and
-        // write at the same time. The sync above makes sure that processing
-        // does not occur in parallel. The test below ensures that if the
-        // first event to be processed results in the socket being closed,
-        // the subsequent events are not processed.
         try {
             if (socketWrapper.isClosed()) {
                 return;
@@ -53,7 +55,9 @@ public abstract class SocketProcessorBase<S> implements Runnable {
             doRun();
         } finally {
             lock.unlock();
+            LOCK_CACHE.remove(socketWrapperLocal, lock);
         }
+
         /*
         synchronized (socketWrapper) {
             // It is possible that processing may be triggered for read and
