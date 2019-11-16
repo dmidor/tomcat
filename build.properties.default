@@ -25,7 +25,7 @@
 # ----- Version Control Flags -----
 version.major=9
 version.minor=0
-version.build=27
+version.build=30
 version.patch=0
 version.suffix=-dev
 
@@ -129,15 +129,15 @@ wsdl4j-lib.loc=${base-maven.loc}/wsdl4j/wsdl4j/${wsdl4j-lib.version}/wsdl4j-${ws
 # ----- Eclipse JDT, version 4.7 or later -----#
 # See https://cwiki.apache.org/confluence/display/TOMCAT/Managing+Tomcat%27s+Dependency+on+the+Eclipse+JDT+Core+Batch+Compiler
 #
-# Checksum is from "SHA512 Checksums for 4.10" link at
-# http://download.eclipse.org/eclipse/downloads/drops4/R-4.10-201812060815/
-# http://download.eclipse.org/eclipse/downloads/drops4/R-4.10-201812060815/checksum/eclipse-4.10-SUMSSHA512
+# Checksum is from "SHA512 Checksums for 4.13" link at
+# http://download.eclipse.org/eclipse/downloads/drops4/R-4.13-201909161045/
+# http://download.eclipse.org/eclipse/downloads/drops4/R-4.13-201909161045/checksum/eclipse-4.13-SUMSSHA512
 #
-jdt.version=4.12
-jdt.release=R-4.12-201906051800/
+jdt.version=4.13
+jdt.release=R-4.13-201909161045/
 jdt.checksum.enabled=true
 jdt.checksum.algorithm=SHA-512
-jdt.checksum.value=7d38921ae374a5112e7ed5596d85955b608ddf74849373d7a74b199961514807e749d8c8cad89871fa1fdd5e14bc6ec471665546a9f8d313da5c963589c307b0
+jdt.checksum.value=d608e4b7fc9b061e327ad5c39112c032e310a48c57ddd01c9349f2be8f5ce4d3d0c3862b6b5cc105220a06a6dd62c477de654b9fbe6f4c8a3d3de816e5de19f7
 jdt.home=${base.path}/ecj-${jdt.version}
 jdt.jar=${jdt.home}/ecj-${jdt.version}.jar
 # The download will be moved to the archive area eventually. We are taking care of that in advance.
@@ -175,20 +175,20 @@ nsis.nsdialogs.dll=${nsis.home}/Plugins/${nsis.arch.dir}nsDialogs.dll
 nsis.loc=${base-sf.loc}/nsis/nsis-${nsis.version}.zip
 
 # ----- Commons Daemon, version 1.2.0 or later -----
-commons-daemon.version=1.2.1
+commons-daemon.version=1.2.2
 
 # checksum for commons-daemon-1.2.1-bin.tar.gz
 commons-daemon.bin.checksum.enabled=true
 commons-daemon.bin.checksum.algorithm=SHA-512
-commons-daemon.bin.checksum.value=ee3ba0ad34579e819ccecde372a9213ff6b5dc48dc95fb20aabc7e5bcfb02406527586c23b9e8d182c4572ee07c6f8d5f9f10db0a3d8ff3eda3f071ef8ac7dcd
+commons-daemon.bin.checksum.value=f9fb917aaf398f61c42796eb4168664e076f81bc3fae82790eb39c723f03a1e7cbc2304161938d8d8993b7fbb718214b94740dbf9679f6ef93e85b5a2e861761
 
 # checksums for commons-daemon-1.2.1-native-src.tar.gz, commons-daemon-1.2.1-bin-windows.zip
 commons-daemon.native.src.checksum.enabled=true
 commons-daemon.native.src.checksum.algorithm=SHA-512
-commons-daemon.native.src.checksum.value=d05114f4e3b6dde2519b3edf5f6915e5a587a13ad5f8d81615ff068705825a94312645eff956b3d2c400422724e890eb590615b31340e767e42ff88b81ebf6a6
+commons-daemon.native.src.checksum.value=45ad856a8a6b024e80905cfac5a741a57ab86479ecd65adab9641f5444d3a2362bb13d1ea38ec3db5eb89d30c29f2f6d3b0e48cbf2f60c081c4df2451acd1ab4
 commons-daemon.native.win.checksum.enabled=true
 commons-daemon.native.win.checksum.algorithm=SHA-512
-commons-daemon.native.win.checksum.value=62777d2424361162736b4a9b39b9fb4155760d4d7c4a3489fe1868e0912158ae126ef5f42abbd1bcca1dbf5aa6204d8d0029be7c49f222293d6e1421a5173dd7
+commons-daemon.native.win.checksum.value=16e7a6fc5bc83ada3bcf9e10cc69ef21400dc019d1f2be00caec0bce72c3bc5a7c72116878e12b4851a15bb473c0948a9c14e1a86b6addcefa6c20638dbcc88c
 
 commons-daemon.home=${base.path}/commons-daemon-${commons-daemon.version}
 commons-daemon.jar=${commons-daemon.home}/commons-daemon-${commons-daemon.version}.jar

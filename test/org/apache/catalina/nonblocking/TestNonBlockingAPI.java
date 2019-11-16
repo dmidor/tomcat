@@ -157,7 +157,10 @@ public class TestNonBlockingAPI extends TomcatBaseTest {
         String servletName = NBWriteServlet.class.getName();
         Tomcat.addServlet(ctx, servletName, servlet);
         ctx.addServletMappingDecoded("/", servletName);
-        tomcat.getConnector().setProperty("socket.txBufSize", "1024");
+        // Note: Low values of socket.txBufSize can trigger very poor
+        //       performance. Set it just low enough to ensure that the
+        //       non-blocking write servlet will see isReady() == false
+        tomcat.getConnector().setProperty("socket.txBufSize", "1048576");
         tomcat.start();
 
         SocketFactory factory = SocketFactory.getDefault();
@@ -192,11 +195,15 @@ public class TestNonBlockingAPI extends TomcatBaseTest {
         int readSinceLastPause = 0;
         while (read != -1) {
             read = is.read(buffer);
+            if (readSinceLastPause == 0) {
+                log.info("Reading data");
+            }
             if (read > 0) {
                 result.append(buffer, 0, read);
             }
             readSinceLastPause += read;
             if (readSinceLastPause > WRITE_SIZE / 16) {
+                log.info("Read " + readSinceLastPause + " bytes, pause 500ms");
                 readSinceLastPause = 0;
                 Thread.sleep(500);
             }
@@ -319,7 +326,10 @@ public class TestNonBlockingAPI extends TomcatBaseTest {
         String servletName = NBWriteServlet.class.getName();
         Tomcat.addServlet(ctx, servletName, servlet);
         ctx.addServletMappingDecoded("/", servletName);
-        tomcat.getConnector().setProperty("socket.txBufSize", "1024");
+        // Note: Low values of socket.txBufSize can trigger very poor
+        //       performance. Set it just low enough to ensure that the
+        //       non-blocking write servlet will see isReady() == false
+        tomcat.getConnector().setProperty("socket.txBufSize", "1048576");
         tomcat.start();
 
         SocketFactory factory = SocketFactory.getDefault();

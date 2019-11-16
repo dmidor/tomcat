@@ -98,7 +98,9 @@ public abstract class AbstractProcessor extends AbstractProcessorLight implement
      * @param t The error which occurred
      */
     protected void setErrorState(ErrorState errorState, Throwable t) {
-        response.setError();
+        // Use the return value to avoid processing more than one async error
+        // in a single async cycle.
+        boolean setError = response.setError();
         boolean blockIo = this.errorState.isIoAllowed() && !errorState.isIoAllowed();
         this.errorState = this.errorState.getMostSevere(errorState);
         // Don't change the status code for IOException since that is almost
@@ -110,17 +112,10 @@ public abstract class AbstractProcessor extends AbstractProcessorLight implement
         if (t != null) {
             request.setAttribute(RequestDispatcher.ERROR_EXCEPTION, t);
         }
-        if (blockIo && !ContainerThreadMarker.isContainerThread() && isAsync()) {
-            // The error occurred on a non-container thread during async
-            // processing which means not all of the necessary clean-up will
-            // have been completed. Dispatch to a container thread to do the
-            // clean-up. Need to do it this way to ensure that all the necessary
-            // clean-up is performed.
-            asyncStateMachine.asyncMustError();
-            if (getLog().isDebugEnabled()) {
-                getLog().debug(sm.getString("abstractProcessor.nonContainerThreadError"), t);
+        if (blockIo && isAsync() && setError) {
+            if (asyncStateMachine.asyncError()) {
+                processSocketEvent(SocketEvent.ERROR, true);
             }
-            processSocketEvent(SocketEvent.ERROR, true);
         }
     }
 
@@ -252,15 +247,25 @@ public abstract class AbstractProcessor extends AbstractProcessorLight implement
 
         rp.setStage(org.apache.coyote.Constants.STAGE_ENDED);
 
+        SocketState state;
+
         if (getErrorState().isError()) {
             request.updateCounters();
-            return SocketState.CLOSED;
+            state = SocketState.CLOSED;
         } else if (isAsync()) {
-            return SocketState.LONG;
+            state = SocketState.LONG;
         } else {
             request.updateCounters();
-            return dispatchEndRequest();
+            state = dispatchEndRequest();
         }
+
+        if (getLog().isDebugEnabled()) {
+            getLog().debug("Socket: [" + socketWrapper +
+                    "], Status in: [" + status +
+                    "], State out: [" + state + "]");
+        }
+
+        return state;
     }
 
 

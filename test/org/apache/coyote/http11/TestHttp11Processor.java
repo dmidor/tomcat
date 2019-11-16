@@ -24,6 +24,7 @@ import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
 import java.io.Reader;
+import java.io.StringReader;
 import java.io.Writer;
 import java.net.InetSocketAddress;
 import java.net.Socket;
@@ -33,7 +34,6 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 
@@ -58,6 +58,7 @@ import org.apache.tomcat.util.buf.B2CConverter;
 import org.apache.tomcat.util.buf.ByteChunk;
 import org.apache.tomcat.util.descriptor.web.SecurityCollection;
 import org.apache.tomcat.util.descriptor.web.SecurityConstraint;
+import org.apache.tomcat.util.http.parser.TokenList;
 
 public class TestHttp11Processor extends TomcatBaseTest {
 
@@ -399,10 +400,9 @@ public class TestHttp11Processor extends TomcatBaseTest {
                 responseHeaders);
 
         Assert.assertEquals(HttpServletResponse.SC_OK, rc);
-        Assert.assertTrue(responseHeaders.containsKey("Transfer-Encoding"));
-        List<String> encodings = responseHeaders.get("Transfer-Encoding");
-        Assert.assertEquals(1, encodings.size());
-        Assert.assertEquals("chunked", encodings.get(0));
+
+        String transferEncoding = getSingleHeader("Transfer-Encoding", responseHeaders);
+        Assert.assertEquals("chunked", transferEncoding);
     }
 
     @Test
@@ -428,10 +428,8 @@ public class TestHttp11Processor extends TomcatBaseTest {
 
         Assert.assertEquals(HttpServletResponse.SC_OK, rc);
 
-        Assert.assertTrue(responseHeaders.containsKey("Connection"));
-        List<String> connections = responseHeaders.get("Connection");
-        Assert.assertEquals(1, connections.size());
-        Assert.assertEquals("close", connections.get(0));
+        String connection = getSingleHeader("Connection", responseHeaders);
+        Assert.assertEquals("close", connection);
 
         Assert.assertFalse(responseHeaders.containsKey("Transfer-Encoding"));
 
@@ -461,9 +459,7 @@ public class TestHttp11Processor extends TomcatBaseTest {
         tomcat.start();
 
         ByteChunk responseBody = new ByteChunk();
-        Map<String,List<String>> responseHeaders = new HashMap<>();
-        int rc = getUrl("http://localhost:" + getPort() + "/test", responseBody,
-                responseHeaders);
+        int rc = getUrl("http://localhost:" + getPort() + "/test", responseBody, null);
 
         Assert.assertEquals(HttpServletResponse.SC_INTERNAL_SERVER_ERROR, rc);
         if (responseBody.getLength() > 0) {
@@ -575,26 +571,37 @@ public class TestHttp11Processor extends TomcatBaseTest {
 
         tomcat.start();
 
-        byte[] requestBody = "HelloWorld".getBytes(StandardCharsets.UTF_8);
-        Map<String,List<String>> reqHeaders = null;
+        String request =
+                "POST /echo HTTP/1.1" + SimpleHttpClient.CRLF +
+                "Host: localhost:" + getPort() + SimpleHttpClient.CRLF;
         if (useExpectation) {
-            reqHeaders = new HashMap<>();
-            List<String> expectation = new ArrayList<>();
-            expectation.add("100-continue");
-            reqHeaders.put("Expect", expectation);
+            request += "Expect: 100-continue" + SimpleHttpClient.CRLF;
         }
-        ByteChunk responseBody = new ByteChunk();
-        Map<String,List<String>> responseHeaders = new HashMap<>();
-        int rc = postUrl(requestBody, "http://localhost:" + getPort() + "/echo",
-                responseBody, reqHeaders, responseHeaders);
+        request += SimpleHttpClient.CRLF +
+                   "HelloWorld";
 
-        Assert.assertEquals(HttpServletResponse.SC_FORBIDDEN, rc);
-        List<String> connectionHeaders = responseHeaders.get("Connection");
+        Client client = new Client(tomcat.getConnector().getLocalPort());
+        client.setRequest(new String[] {request});
+
+        client.connect();
+        client.processRequest();
+
+        Assert.assertTrue(client.isResponse403());
+        String connectionHeaderValue = null;
+        for (String header : client.getResponseHeaders()) {
+            if (header.startsWith("Connection:")) {
+                connectionHeaderValue = header.substring(header.indexOf(':') + 1).trim();
+                break;
+            }
+        }
+
         if (useExpectation) {
+            List<String> connectionHeaders = new ArrayList<>();
+            TokenList.parseTokenList(new StringReader(connectionHeaderValue), connectionHeaders);
             Assert.assertEquals(1, connectionHeaders.size());
-            Assert.assertEquals("close", connectionHeaders.get(0).toLowerCase(Locale.ENGLISH));
+            Assert.assertEquals("close", connectionHeaders.get(0));
         } else {
-            Assert.assertNull(connectionHeaders);
+            Assert.assertNull(connectionHeaderValue);
         }
     }
 
@@ -988,8 +995,8 @@ public class TestHttp11Processor extends TomcatBaseTest {
         int rc = getUrl("http://localhost:" + getPort() + "/test", responseBody, responseHeaders);
 
         Assert.assertEquals(HttpServletResponse.SC_RESET_CONTENT, rc);
-        Assert.assertNotNull(responseHeaders.get("Content-Length"));
-        Assert.assertTrue("0".equals(responseHeaders.get("Content-Length").get(0)));
+        String contentLength = getSingleHeader("Content-Length", responseHeaders);
+        Assert.assertEquals("0", contentLength);
         Assert.assertTrue(responseBody.getLength() == 0);
     }
 
@@ -1500,6 +1507,105 @@ public class TestHttp11Processor extends TomcatBaseTest {
         // Expected response is a 200 response.
         Assert.assertTrue(client.isResponse200());
         Assert.assertEquals("request.getServerName() is [] and request.getServerPort() is " + getPort(), client.getResponseBody());
+    }
+
+
+    @Test
+    public void testKeepAliveHeader01() throws Exception {
+        doTestKeepAliveHeader(false, 3000, 10);
+    }
+
+    @Test
+    public void testKeepAliveHeader02() throws Exception {
+        doTestKeepAliveHeader(true, 5000, 1);
+    }
+
+    @Test
+    public void testKeepAliveHeader03() throws Exception {
+        doTestKeepAliveHeader(true, 5000, 10);
+    }
+
+    @Test
+    public void testKeepAliveHeader04() throws Exception {
+        doTestKeepAliveHeader(true, -1, 10);
+    }
+
+    @Test
+    public void testKeepAliveHeader05() throws Exception {
+        doTestKeepAliveHeader(true, -1, 1);
+    }
+
+    @Test
+    public void testKeepAliveHeader06() throws Exception {
+        doTestKeepAliveHeader(true, -1, -1);
+    }
+
+    private void doTestKeepAliveHeader(boolean sendKeepAlive, int keepAliveTimeout,
+            int maxKeepAliveRequests) throws Exception {
+        Tomcat tomcat = getTomcatInstance();
+
+        tomcat.getConnector().setAttribute("keepAliveTimeout", Integer.valueOf(keepAliveTimeout));
+        tomcat.getConnector().setAttribute("maxKeepAliveRequests", Integer.valueOf(maxKeepAliveRequests));
+
+        // No file system docBase required
+        Context ctx = tomcat.addContext("", null);
+
+        // Add servlet
+        Tomcat.addServlet(ctx, "TesterServlet", new TesterServlet());
+        ctx.addServletMappingDecoded("/foo", "TesterServlet");
+
+        tomcat.start();
+
+        String request =
+                "GET /foo HTTP/1.1" + SimpleHttpClient.CRLF +
+                "Host: localhost:" + getPort() + SimpleHttpClient.CRLF;
+
+        if (sendKeepAlive) {
+            request += "Connection: keep-alive" + SimpleHttpClient.CRLF;
+        }
+
+        request += SimpleHttpClient.CRLF;
+
+        Client client = new Client(tomcat.getConnector().getLocalPort());
+        client.setRequest(new String[] {request});
+
+        client.connect();
+        client.processRequest(false);
+
+        Assert.assertTrue(client.isResponse200());
+
+        String connectionHeaderValue = null;
+        String keepAliveHeaderValue = null;
+        for (String header : client.getResponseHeaders()) {
+            if (header.startsWith("Connection:")) {
+                connectionHeaderValue = header.substring(header.indexOf(':') + 1).trim();
+            }
+            if (header.startsWith("Keep-Alive:")) {
+                keepAliveHeaderValue = header.substring(header.indexOf(':') + 1).trim();
+            }
+        }
+
+        if (!sendKeepAlive || keepAliveTimeout < 0
+            && (maxKeepAliveRequests < 0 || maxKeepAliveRequests > 1)) {
+            Assert.assertNull(connectionHeaderValue);
+            Assert.assertNull(keepAliveHeaderValue);
+        } else {
+            List<String> connectionHeaders = new ArrayList<>();
+            TokenList.parseTokenList(new StringReader(connectionHeaderValue), connectionHeaders);
+
+            if (sendKeepAlive && keepAliveTimeout > 0 &&
+                (maxKeepAliveRequests < 0 || maxKeepAliveRequests > 1)) {
+                Assert.assertEquals(1, connectionHeaders.size());
+                Assert.assertEquals("keep-alive", connectionHeaders.get(0));
+                Assert.assertEquals("timeout=" + keepAliveTimeout / 1000L, keepAliveHeaderValue);
+            }
+
+            if (sendKeepAlive && maxKeepAliveRequests == 1) {
+                Assert.assertEquals(1, connectionHeaders.size());
+                Assert.assertEquals("close", connectionHeaders.get(0));
+                Assert.assertNull(keepAliveHeaderValue);
+            }
+        }
     }
 
 

@@ -393,6 +393,8 @@ public class NioEndpoint extends AbstractJsseEndpoint<NioChannel,SocketChannel> 
      */
     @Override
     protected boolean setSocketOptions(SocketChannel socket) {
+        NioChannel channel = null;
+        boolean success = false;
         // Process the connection
         try {
             // Disable blocking, polling will be used
@@ -400,7 +402,6 @@ public class NioEndpoint extends AbstractJsseEndpoint<NioChannel,SocketChannel> 
             Socket sock = socket.socket();
             socketProperties.setProperties(sock);
 
-            NioChannel channel = null;
             if (nioChannels != null) {
                 channel = nioChannels.pop();
             }
@@ -410,22 +411,20 @@ public class NioEndpoint extends AbstractJsseEndpoint<NioChannel,SocketChannel> 
                         socketProperties.getAppWriteBufSize(),
                         socketProperties.getDirectBuffer());
                 if (isSSLEnabled()) {
-                    channel = new SecureNioChannel(socket, bufhandler, selectorPool, this);
+                    channel = new SecureNioChannel(bufhandler, selectorPool, this);
                 } else {
-                    channel = new NioChannel(socket, bufhandler);
+                    channel = new NioChannel(bufhandler);
                 }
-            } else {
-                channel.setIOChannel(socket);
-                channel.reset();
             }
             NioSocketWrapper socketWrapper = new NioSocketWrapper(channel, this);
-            channel.setSocketWrapper(socketWrapper);
+            connections.put(channel, socketWrapper);
+            channel.reset(socket, socketWrapper);
             socketWrapper.setReadTimeout(getConnectionTimeout());
             socketWrapper.setWriteTimeout(getConnectionTimeout());
             socketWrapper.setKeepAliveLeft(NioEndpoint.this.getMaxKeepAliveRequests());
             socketWrapper.setSecure(isSSLEnabled());
             poller.register(channel, socketWrapper);
-            return true;
+            success = true;
         } catch (Throwable t) {
             ExceptionUtils.handleThrowable(t);
             try {
@@ -433,9 +432,14 @@ public class NioEndpoint extends AbstractJsseEndpoint<NioChannel,SocketChannel> 
             } catch (Throwable tt) {
                 ExceptionUtils.handleThrowable(tt);
             }
+        } finally {
+            if (!success && channel != null) {
+                connections.remove(channel);
+                channel.free();
+            }
         }
-        // Tell to close the socket
-        return false;
+        // Tell to close the socket if needed
+        return success;
     }
 
 
@@ -949,24 +953,25 @@ public class NioEndpoint extends AbstractJsseEndpoint<NioChannel,SocketChannel> 
                             cancelledKey(key, socketWrapper);
                         } else if ((socketWrapper.interestOps() & SelectionKey.OP_READ) == SelectionKey.OP_READ ||
                                   (socketWrapper.interestOps() & SelectionKey.OP_WRITE) == SelectionKey.OP_WRITE) {
-                            boolean isTimedOut = false;
                             boolean readTimeout = false;
                             boolean writeTimeout = false;
                             // Check for read timeout
                             if ((socketWrapper.interestOps() & SelectionKey.OP_READ) == SelectionKey.OP_READ) {
                                 long delta = now - socketWrapper.getLastRead();
                                 long timeout = socketWrapper.getReadTimeout();
-                                isTimedOut = timeout > 0 && delta > timeout;
-                                readTimeout = true;
+                                if (timeout > 0 && delta > timeout) {
+                                    readTimeout = true;
+                                }
                             }
                             // Check for write timeout
-                            if (!isTimedOut && (socketWrapper.interestOps() & SelectionKey.OP_WRITE) == SelectionKey.OP_WRITE) {
+                            if (!readTimeout && (socketWrapper.interestOps() & SelectionKey.OP_WRITE) == SelectionKey.OP_WRITE) {
                                 long delta = now - socketWrapper.getLastWrite();
                                 long timeout = socketWrapper.getWriteTimeout();
-                                isTimedOut = timeout > 0 && delta > timeout;
-                                writeTimeout = true;
+                                if (timeout > 0 && delta > timeout) {
+                                    writeTimeout = true;
+                                }
                             }
-                            if (isTimedOut) {
+                            if (readTimeout || writeTimeout) {
                                 key.interestOps(0);
                                 // Avoid duplicate timeout calls
                                 socketWrapper.interestOps(0);
@@ -1162,19 +1167,10 @@ public class NioEndpoint extends AbstractJsseEndpoint<NioChannel,SocketChannel> 
         @Override
         protected void doClose() {
             if (log.isDebugEnabled()) {
-                log.debug("Calling [" + getEndpoint() + "].closeSocket([" + this + "])", new Exception());
-            }
-            try {
-                getEndpoint().getHandler().release(this);
-            } catch (Throwable e) {
-                ExceptionUtils.handleThrowable(e);
-                if (log.isDebugEnabled()) {
-                    log.error(sm.getString("endpoint.debug.handlerRelease"), e);
-                }
+                log.debug("Calling [" + getEndpoint() + "].closeSocket([" + this + "])");
             }
             try {
                 synchronized (getSocket()) {
-                    getEndpoint().countDownConnection();
                     if (getSocket().isOpen()) {
                         getSocket().close(true);
                     }
@@ -1287,12 +1283,18 @@ public class NioEndpoint extends AbstractJsseEndpoint<NioChannel,SocketChannel> 
 
         @Override
         public void registerReadInterest() {
+            if (log.isDebugEnabled()) {
+                log.debug(sm.getString("endpoint.debug.registerRead", this));
+            }
             getPoller().add(this, SelectionKey.OP_READ);
         }
 
 
         @Override
         public void registerWriteInterest() {
+            if (log.isDebugEnabled()) {
+                log.debug(sm.getString("endpoint.debug.registerWrite", this));
+            }
             getPoller().add(this, SelectionKey.OP_WRITE);
         }
 

@@ -70,7 +70,7 @@ public class SecureNio2Channel extends Nio2Channel  {
     protected boolean closed;
     protected boolean closing;
 
-    private volatile boolean unwrapBeforeRead = false;
+    private volatile boolean unwrapBeforeRead;
     private final CompletionHandler<Integer, SocketWrapperBase<Nio2Channel>> handshakeReadCompletionHandler;
     private final CompletionHandler<Integer, SocketWrapperBase<Nio2Channel>> handshakeWriteCompletionHandler;
 
@@ -130,6 +130,7 @@ public class SecureNio2Channel extends Nio2Channel  {
         sslEngine = null;
         sniComplete = false;
         handshakeComplete = false;
+        unwrapBeforeRead = true;
         closed = false;
         closing = false;
         netInBuffer.clear();
@@ -242,10 +243,10 @@ public class SecureNio2Channel extends Nio2Channel  {
                 case FINISHED: {
                     if (endpoint.hasNegotiableProtocols()) {
                         if (sslEngine instanceof SSLUtil.ProtocolInfo) {
-                            socket.setNegotiatedProtocol(
+                            socketWrapper.setNegotiatedProtocol(
                                     ((SSLUtil.ProtocolInfo) sslEngine).getNegotiatedProtocol());
                         } else if (JreCompat.isJre9Available()) {
-                            socket.setNegotiatedProtocol(
+                            socketWrapper.setNegotiatedProtocol(
                                     JreCompat.getInstance().getApplicationProtocol(sslEngine));
                         }
                     }
@@ -257,7 +258,7 @@ public class SecureNio2Channel extends Nio2Channel  {
                     } else {
                         if (async) {
                             sc.write(netOutBuffer, AbstractEndpoint.toTimeout(timeout),
-                                    TimeUnit.MILLISECONDS, socket, handshakeWriteCompletionHandler);
+                                    TimeUnit.MILLISECONDS, socketWrapper, handshakeWriteCompletionHandler);
                         } else {
                             try {
                                 if (timeout > 0) {
@@ -295,7 +296,7 @@ public class SecureNio2Channel extends Nio2Channel  {
                         //should actually return OP_READ if we have NEED_UNWRAP
                         if (async) {
                             sc.write(netOutBuffer, AbstractEndpoint.toTimeout(timeout),
-                                    TimeUnit.MILLISECONDS, socket, handshakeWriteCompletionHandler);
+                                    TimeUnit.MILLISECONDS, socketWrapper, handshakeWriteCompletionHandler);
                         } else {
                             try {
                                 if (timeout > 0) {
@@ -327,7 +328,7 @@ public class SecureNio2Channel extends Nio2Channel  {
                         //read more data
                         if (async) {
                             sc.read(netInBuffer, AbstractEndpoint.toTimeout(timeout),
-                                    TimeUnit.MILLISECONDS, socket, handshakeReadCompletionHandler);
+                                    TimeUnit.MILLISECONDS, socketWrapper, handshakeReadCompletionHandler);
                         } else {
                             try {
                                 int read;
@@ -372,7 +373,7 @@ public class SecureNio2Channel extends Nio2Channel  {
         // SNIExtractor only to discover there is no data to process
         if (netInBuffer.position() == 0) {
             sc.read(netInBuffer, AbstractEndpoint.toTimeout(endpoint.getConnectionTimeout()),
-                    TimeUnit.MILLISECONDS, socket, handshakeReadCompletionHandler);
+                    TimeUnit.MILLISECONDS, socketWrapper, handshakeReadCompletionHandler);
             return 1;
         }
 
@@ -388,7 +389,7 @@ public class SecureNio2Channel extends Nio2Channel  {
 
             netInBuffer = ByteBufferUtils.expand(netInBuffer, newLimit);
             sc.read(netInBuffer, AbstractEndpoint.toTimeout(endpoint.getConnectionTimeout()),
-                    TimeUnit.MILLISECONDS, socket, handshakeReadCompletionHandler);
+                    TimeUnit.MILLISECONDS, socketWrapper, handshakeReadCompletionHandler);
             return 1;
         }
 
@@ -406,7 +407,7 @@ public class SecureNio2Channel extends Nio2Channel  {
             break;
         case NEED_READ:
             sc.read(netInBuffer, AbstractEndpoint.toTimeout(endpoint.getConnectionTimeout()),
-                    TimeUnit.MILLISECONDS, socket, handshakeReadCompletionHandler);
+                    TimeUnit.MILLISECONDS, socketWrapper, handshakeReadCompletionHandler);
             return 1;
         case UNDERFLOW:
             // Unable to buffer enough data to read SNI extension data

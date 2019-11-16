@@ -212,8 +212,8 @@ public class Nio2Endpoint extends AbstractJsseEndpoint<Nio2Channel,AsynchronousS
                 public void run() {
                     // Then close all active connections if any remain
                     try {
-                        for (Nio2Channel channel : getHandler().getOpenSockets()) {
-                            channel.getSocket().close();
+                        for (SocketWrapperBase<Nio2Channel> wrapper : getConnections()) {
+                            wrapper.close();
                         }
                     } catch (Throwable t) {
                         ExceptionUtils.handleThrowable(t);
@@ -302,9 +302,10 @@ public class Nio2Endpoint extends AbstractJsseEndpoint<Nio2Channel,AsynchronousS
      */
     @Override
     protected boolean setSocketOptions(AsynchronousSocketChannel socket) {
+        Nio2Channel channel = null;
+        boolean success = false;
         try {
             socketProperties.setProperties(socket);
-            Nio2Channel channel = null;
             if (nioChannels != null) {
                 channel = nioChannels.pop();
             }
@@ -320,19 +321,25 @@ public class Nio2Endpoint extends AbstractJsseEndpoint<Nio2Channel,AsynchronousS
                 }
             }
             Nio2SocketWrapper socketWrapper = new Nio2SocketWrapper(channel, this);
+            connections.put(channel, socketWrapper);
             channel.reset(socket, socketWrapper);
             socketWrapper.setReadTimeout(getConnectionTimeout());
             socketWrapper.setWriteTimeout(getConnectionTimeout());
             socketWrapper.setKeepAliveLeft(Nio2Endpoint.this.getMaxKeepAliveRequests());
             socketWrapper.setSecure(isSSLEnabled());
-            // Continue processing on another thread
-            return processSocket(socketWrapper, SocketEvent.OPEN_READ, false);
+            // Continue processing on the same thread as the acceptor is async
+            success = processSocket(socketWrapper, SocketEvent.OPEN_READ, false);
         } catch (Throwable t) {
             ExceptionUtils.handleThrowable(t);
-            log.error(sm.getString("endpoint.socketOptionsError"),t);
+            log.error(sm.getString("endpoint.socketOptionsError"), t);
+        } finally {
+            if (!success && channel != null) {
+                connections.remove(channel);
+                channel.free();
+            }
         }
-        // Tell to close the socket
-        return false;
+        // Tell to close the socket if needed
+        return success;
     }
 
 
@@ -912,19 +919,10 @@ public class Nio2Endpoint extends AbstractJsseEndpoint<Nio2Channel,AsynchronousS
         @Override
         protected void doClose() {
             if (log.isDebugEnabled()) {
-                log.debug("Calling [" + getEndpoint() + "].closeSocket([" + this + "])", new Exception());
-            }
-            try {
-                getEndpoint().getHandler().release(this);
-            } catch (Throwable e) {
-                ExceptionUtils.handleThrowable(e);
-                if (log.isDebugEnabled()) {
-                    log.error(sm.getString("endpoint.debug.handlerRelease"), e);
-                }
+                log.debug("Calling [" + getEndpoint() + "].closeSocket([" + this + "])");
             }
             try {
                 synchronized (getSocket()) {
-                    getEndpoint().countDownConnection();
                     if (getSocket().isOpen()) {
                         getSocket().close(true);
                     }
@@ -1376,6 +1374,9 @@ public class Nio2Endpoint extends AbstractJsseEndpoint<Nio2Channel,AsynchronousS
                 if (readNotify) {
                     return;
                 }
+                if (log.isDebugEnabled()) {
+                    log.debug(sm.getString("endpoint.debug.registerRead", this));
+                }
                 readInterest = true;
                 if (readPending.tryAcquire()) {
                     // No read pending, so do a read
@@ -1402,6 +1403,9 @@ public class Nio2Endpoint extends AbstractJsseEndpoint<Nio2Channel,AsynchronousS
                 // A notification is already being sent
                 if (writeNotify) {
                     return;
+                }
+                if (log.isDebugEnabled()) {
+                    log.debug(sm.getString("endpoint.debug.registerWrite", this));
                 }
                 writeInterest = true;
                 if (writePending.availablePermits() == 1) {

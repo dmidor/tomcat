@@ -89,18 +89,26 @@ public class CatalinaBaseConfigurationSource implements ConfigurationSource {
         }
 
         // Try classloader
-        try(InputStream stream = getClass().getClassLoader().getResourceAsStream(name)) {
-            if (stream != null) {
+        InputStream stream = getClass().getClassLoader().getResourceAsStream(name);
+        if (stream != null) {
+            try {
                 return new Resource(stream, getClass().getClassLoader().getResource(name).toURI());
+            } catch (InvalidPathException e) {
+                // Ignore. Some valid file URIs can trigger this.
+                stream.close();
+            } catch (URISyntaxException e) {
+                stream.close();
+                throw new IOException(sm.getString("catalinaConfigurationSource.cannotObtainURL", name), e);
             }
-        } catch (InvalidPathException e) {
-            // Ignore. Some valid file URIs can trigger this.
-        } catch (URISyntaxException e) {
-            throw new IOException(sm.getString("catalinaConfigurationSource.cannotObtainURL", name), e);
         }
 
         // Then try URI.
-        URI uri = getURI(name);
+        URI uri = null;
+        try {
+            uri = getURI(name);
+        } catch (IllegalArgumentException e) {
+            throw new IOException(sm.getString("catalinaConfigurationSource.cannotObtainURL", name), e);
+        }
 
         // Obtain the input stream we need
         try {

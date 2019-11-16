@@ -25,7 +25,9 @@ import java.net.SocketException;
 import java.util.ArrayList;
 import java.util.Enumeration;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -103,7 +105,10 @@ public abstract class AbstractEndpoint<S,U> {
          *
          * @return The sockets for which the handler is tracking a currently
          *         open connection
+         * @deprecated Unused, will be removed in Tomcat 10, replaced
+         *         by AbstractEndpoint.getConnections
          */
+        @Deprecated
         public Set<S> getOpenSockets();
 
         /**
@@ -182,6 +187,19 @@ public abstract class AbstractEndpoint<S,U> {
     protected SynchronizedStack<SocketProcessorBase<S>> processorCache;
 
     private ObjectName oname = null;
+
+    /**
+     * Map holding all current connections keyed with the sockets (for APR).
+     */
+    protected Map<S, SocketWrapperBase<S>> connections = new ConcurrentHashMap<>();
+
+    /**
+     * Get a set with the current open connections.
+     * @return A set with the open socket wrappers
+     */
+    public Set<SocketWrapperBase<S>> getConnections() {
+        return new HashSet<>(connections.values());
+    }
 
     // ----------------------------------------------------------------- Properties
 

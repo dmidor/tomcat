@@ -640,9 +640,16 @@
     </attribute>
 
     <attribute name="useAsyncIO" required="false">
-      <p>(bool)Use this attribute to enable or disable usage of the
+      <p>(bool) Use this attribute to enable or disable usage of the
       asynchronous IO API. The default value is <code>true</code> except when
       using the APR connector due to low performance.</p>
+    </attribute>
+
+    <attribute name="useKeepAliveResponseHeader" required="false">
+      <p>(bool) Use this attribute to enable or disable the addition of the
+      <code>Keep-Alive</code> HTTP response header as described in
+      <a href="https://tools.ietf.org/html/draft-thomson-hybi-http-timeout-03">this
+      Internet-Draft</a>. The default value is <code>true</code>.</p>
     </attribute>
 
   </attributes>
@@ -662,7 +669,9 @@
       </attribute>
       <attribute name="socket.txBufSize" required="false">
         <p>(int)The socket send buffer (SO_SNDBUF) size in bytes. JVM default
-        used if not set.</p>
+        used if not set. Care should be taken if explicitly setting this value.
+        Very poor performance has been observed on some JVMs with values less
+        than ~8k.</p>
       </attribute>
       <attribute name="socket.tcpNoDelay" required="false">
         <p>(bool)This is equivalent to standard attribute

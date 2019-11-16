@@ -46,19 +46,18 @@ public abstract class AbstractProcessorLight implements Processor {
         do {
             if (dispatches != null) {
                 DispatchType nextDispatch = dispatches.next();
+                if (getLog().isDebugEnabled()) {
+                    getLog().debug("Processing dispatch type: [" + nextDispatch + "]");
+                }
                 state = dispatch(nextDispatch.getSocketStatus());
+                if (!dispatches.hasNext()) {
+                    state = checkForPipelinedData(state, socketWrapper);
+                }
             } else if (status == SocketEvent.DISCONNECT) {
                 // Do nothing here, just wait for it to get recycled
             } else if (isAsync() || isUpgrade() || state == SocketState.ASYNC_END) {
                 state = dispatch(status);
-                if (state == SocketState.OPEN) {
-                    // There may be pipe-lined data to read. If the data isn't
-                    // processed now, execution will exit this loop and call
-                    // release() which will recycle the processor (and input
-                    // buffer) deleting any pipe-lined data. To avoid this,
-                    // process it now.
-                    state = service(socketWrapper);
-                }
+                state = checkForPipelinedData(state, socketWrapper);
             } else if (status == SocketEvent.OPEN_WRITE) {
                 // Extra write event likely after async, ignore
                 state = SocketState.LONG;
@@ -95,6 +94,21 @@ public abstract class AbstractProcessorLight implements Processor {
                 dispatches != null && state != SocketState.CLOSED);
 
         return state;
+    }
+
+
+    private SocketState checkForPipelinedData(SocketState inState, SocketWrapperBase<?> socketWrapper)
+            throws IOException {
+        if (inState == SocketState.OPEN) {
+            // There may be pipe-lined data to read. If the data isn't
+            // processed now, execution will exit this loop and call
+            // release() which will recycle the processor (and input
+            // buffer) deleting any pipe-lined data. To avoid this,
+            // process it now.
+            return service(socketWrapper);
+        } else {
+            return inState;
+        }
     }
 
 

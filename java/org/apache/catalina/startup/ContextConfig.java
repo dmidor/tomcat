@@ -1599,6 +1599,9 @@ public class ContextConfig implements LifecycleListener {
                 entry = new DefaultWebXmlCacheEntry(webXmlDefaultFragment,
                         globalTimeStamp, hostTimeStamp);
                 hostWebXmlCache.put(host, entry);
+                // Add a Lifecycle listener to the Host that will remove it from
+                // the hostWebXmlCache once the Host is destroyed
+                host.addLifecycleListener(new HostWebXmlCacheCleaner());
             }
 
             return webXmlDefaultFragment;
@@ -1715,6 +1718,7 @@ public class ContextConfig implements LifecycleListener {
         }
     }
 
+
     /**
      * Scan JARs that contain web-fragment.xml files that will be used to
      * configure this application to see if they also contain static resources.
@@ -1783,6 +1787,7 @@ public class ContextConfig implements LifecycleListener {
         }
         return getWebXmlSource(defaultWebXml, true);
     }
+
 
     /**
      * Identify the host web.xml to be used and obtain an input source for
@@ -1956,6 +1961,7 @@ public class ContextConfig implements LifecycleListener {
             // validation is not enabled
             parseRequired = false;
         }
+
         FragmentJarScannerCallback callback =
                 new FragmentJarScannerCallback(webXmlParser, delegate, parseRequired);
 
@@ -2678,6 +2684,18 @@ public class ContextConfig implements LifecycleListener {
 
         public long getHostTimeStamp() {
             return hostTimeStamp;
+        }
+    }
+
+    private static class HostWebXmlCacheCleaner implements LifecycleListener {
+
+        @Override
+        public void lifecycleEvent(LifecycleEvent event) {
+
+            if (Lifecycle.AFTER_DESTROY_EVENT.equals(event.getType())) {
+                Host host = (Host) event.getSource();
+                hostWebXmlCache.remove(host);
+            }
         }
     }
 

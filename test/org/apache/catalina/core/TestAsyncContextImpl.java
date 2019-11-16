@@ -20,12 +20,13 @@ import java.io.IOException;
 import java.io.PrintWriter;
 import java.net.URI;
 import java.net.URISyntaxException;
-import java.util.HashMap;
-import java.util.LinkedHashMap;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import javax.servlet.AsyncContext;
 import javax.servlet.AsyncEvent;
@@ -35,12 +36,14 @@ import javax.servlet.GenericServlet;
 import javax.servlet.RequestDispatcher;
 import javax.servlet.Servlet;
 import javax.servlet.ServletException;
+import javax.servlet.ServletOutputStream;
 import javax.servlet.ServletRequest;
 import javax.servlet.ServletRequestEvent;
 import javax.servlet.ServletRequestListener;
 import javax.servlet.ServletRequestWrapper;
 import javax.servlet.ServletResponse;
 import javax.servlet.ServletResponseWrapper;
+import javax.servlet.WriteListener;
 import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
@@ -53,11 +56,14 @@ import org.apache.catalina.Context;
 import org.apache.catalina.Wrapper;
 import org.apache.catalina.connector.Request;
 import org.apache.catalina.connector.Response;
+import org.apache.catalina.connector.TestCoyoteAdapter;
+import org.apache.catalina.startup.SimpleHttpClient;
 import org.apache.catalina.startup.Tomcat;
 import org.apache.catalina.startup.TomcatBaseTest;
 import org.apache.catalina.valves.TesterAccessLogValve;
 import org.apache.tomcat.unittest.TesterContext;
 import org.apache.tomcat.util.buf.ByteChunk;
+import org.apache.tomcat.util.collections.CaseInsensitiveKeyMap;
 import org.apache.tomcat.util.descriptor.web.ErrorPage;
 import org.easymock.EasyMock;
 
@@ -224,14 +230,12 @@ public class TestAsyncContextImpl extends TomcatBaseTest {
 
         // Call the servlet once
         ByteChunk bc = new ByteChunk();
-        Map<String,List<String>> headers = new HashMap<>();
+        Map<String,List<String>> headers = new CaseInsensitiveKeyMap<>();
         getUrl("http://localhost:" + getPort() + "/", bc, headers);
 
         Assert.assertEquals("OK", bc.toString());
-        List<String> contentLength = headers.get("Content-Length");
-        Assert.assertNotNull(contentLength);
-        Assert.assertEquals(1,  contentLength.size());
-        Assert.assertEquals("2", contentLength.get(0));
+        String contentLength = getSingleHeader("Content-Length", headers);
+        Assert.assertEquals("2", contentLength);
 
         // Check the access log
         alv.validateAccessLog(1, 200, 0, REQUEST_TIME);
@@ -552,19 +556,25 @@ public class TestAsyncContextImpl extends TomcatBaseTest {
             alv.validateAccessLog(1, 200, timeoutDelay,
                     timeoutDelay + TIMEOUT_MARGIN + REQUEST_TIME);
         }
+
+        Assert.assertTrue(timeout.isAsyncStartedCorrect());
     }
 
     private static class TimeoutServlet extends HttpServlet {
         private static final long serialVersionUID = 1L;
 
         private final Boolean completeOnTimeout;
-        private final String dispatchUrl;
+        private final transient TrackingListener trackingListener;
 
         public static final long ASYNC_TIMEOUT = 100;
 
         public TimeoutServlet(Boolean completeOnTimeout, String dispatchUrl) {
             this.completeOnTimeout = completeOnTimeout;
-            this.dispatchUrl = dispatchUrl;
+            if (completeOnTimeout == null) {
+                this.trackingListener = null;
+            } else {
+                this.trackingListener = new TrackingListener(false, completeOnTimeout.booleanValue(), dispatchUrl);
+            }
         }
 
         @Override
@@ -576,12 +586,18 @@ public class TestAsyncContextImpl extends TomcatBaseTest {
                 ac.setTimeout(ASYNC_TIMEOUT);
 
                 if (completeOnTimeout != null) {
-                    ac.addListener(new TrackingListener(false,
-                            completeOnTimeout.booleanValue(), dispatchUrl));
+                    ac.addListener(trackingListener);
                 }
             } else {
                 resp.getWriter().print("FAIL: Async unsupported");
             }
+        }
+
+        public boolean isAsyncStartedCorrect() {
+            if (trackingListener == null) {
+                return true;
+            }
+            return trackingListener.isAsyncStartedCorrect();
         }
     }
 
@@ -667,6 +683,7 @@ public class TestAsyncContextImpl extends TomcatBaseTest {
             count ++;
         }
         Assert.assertEquals(expectedTrack, getTrack());
+        Assert.assertTrue(dispatch.isAsyncStartedCorrect());
 
         // Check the access log
         alv.validateAccessLog(1, 200, 0, REQUEST_TIME);
@@ -677,13 +694,15 @@ public class TestAsyncContextImpl extends TomcatBaseTest {
         private static final long serialVersionUID = 1L;
         private static final String ITER_PARAM = "iter";
         private static final String DISPATCH_CHECK = "check";
-        private boolean addTrackingListener = false;
-        private boolean completeOnError = false;
+        private final transient TrackingListener trackingListener;
 
         public DispatchingServlet(boolean addTrackingListener,
                 boolean completeOnError) {
-            this.addTrackingListener = addTrackingListener;
-            this.completeOnError = completeOnError;
+            if (addTrackingListener) {
+                trackingListener = new TrackingListener(completeOnError, true, null);
+            } else {
+                trackingListener = null;
+            }
         }
 
         @Override
@@ -698,10 +717,8 @@ public class TestAsyncContextImpl extends TomcatBaseTest {
             track("DispatchingServletGet-");
             final int iter = Integer.parseInt(req.getParameter(ITER_PARAM)) - 1;
             final AsyncContext ctxt = req.startAsync();
-            if (addTrackingListener) {
-                TrackingListener listener =
-                    new TrackingListener(completeOnError, true, null);
-                ctxt.addListener(listener);
+            if (trackingListener != null) {
+                ctxt.addListener(trackingListener);
             }
             Runnable run = new Runnable() {
                 @Override
@@ -719,6 +736,13 @@ public class TestAsyncContextImpl extends TomcatBaseTest {
             } else {
                 run.run();
             }
+        }
+
+        public boolean isAsyncStartedCorrect() {
+            if (trackingListener == null) {
+                return true;
+            }
+            return trackingListener.isAsyncStartedCorrect();
         }
     }
 
@@ -824,6 +848,9 @@ public class TestAsyncContextImpl extends TomcatBaseTest {
         private final boolean completeOnError;
         private final boolean completeOnTimeout;
         private final String dispatchUrl;
+        // Assumes listener is fired after container thread that initiated async
+        // has exited.
+        private boolean asyncStartedCorrect = true;
 
         public TrackingListener(boolean completeOnError,
                 boolean completeOnTimeout, String dispatchUrl) {
@@ -839,26 +866,43 @@ public class TestAsyncContextImpl extends TomcatBaseTest {
 
         @Override
         public void onTimeout(AsyncEvent event) throws IOException {
+            boolean expectedAsyncStarted = true;
+
             TestAsyncContextImpl.track("onTimeout-");
             if (completeOnTimeout){
                 event.getAsyncContext().complete();
+                expectedAsyncStarted = false;
             }
             if (dispatchUrl != null) {
                 event.getAsyncContext().dispatch(dispatchUrl);
+                expectedAsyncStarted = false;
             }
+
+            ServletRequest req = event.getSuppliedRequest();
+            asyncStartedCorrect = (expectedAsyncStarted == req.isAsyncStarted());
         }
 
         @Override
         public void onError(AsyncEvent event) throws IOException {
+            boolean expectedAsyncStarted = true;
+
             TestAsyncContextImpl.track("onError-");
             if (completeOnError) {
                 event.getAsyncContext().complete();
+                expectedAsyncStarted = false;
             }
+
+            ServletRequest req = event.getSuppliedRequest();
+            asyncStartedCorrect = (expectedAsyncStarted == req.isAsyncStarted());
         }
 
         @Override
         public void onStartAsync(AsyncEvent event) throws IOException {
             TestAsyncContextImpl.track("onStartAsync-");
+        }
+
+        public boolean isAsyncStartedCorrect() {
+            return asyncStartedCorrect;
         }
     }
 
@@ -1010,6 +1054,7 @@ public class TestAsyncContextImpl extends TomcatBaseTest {
             count ++;
         }
         Assert.assertEquals(expectedTrack, getTrack());
+        Assert.assertTrue(dispatch.isAsyncStartedCorrect());
 
         // Check the access log
         alv.validateAccessLog(1, 500, 0, REQUEST_TIME);
@@ -1122,15 +1167,13 @@ public class TestAsyncContextImpl extends TomcatBaseTest {
         tomcat.start();
 
         // Call the servlet once
-        Map<String,List<String>> headers = new LinkedHashMap<>();
+        Map<String,List<String>> headers = new CaseInsensitiveKeyMap<>();
         ByteChunk bc = new ByteChunk();
         int rc = getUrl("http://localhost:" + getPort() + "/", bc, headers);
         Assert.assertEquals(200, rc);
         Assert.assertEquals("OK", bc.toString());
-        List<String> testHeader = headers.get("A");
-        Assert.assertNotNull(testHeader);
-        Assert.assertEquals(1, testHeader.size());
-        Assert.assertEquals("xyz",testHeader.get(0));
+        String testHeader = getSingleHeader("A", headers);
+        Assert.assertEquals("xyz",testHeader);
 
         // Check the access log
         alv.validateAccessLog(1, 200, Bug50753Servlet.THREAD_SLEEP_TIME,
@@ -1838,7 +1881,8 @@ public class TestAsyncContextImpl extends TomcatBaseTest {
         Tomcat tomcat = getTomcatInstance();
 
         Context ctx = tomcat.addContext("", null);
-        Wrapper w = tomcat.addServlet("", "async", new Bug59219Servlet());
+        Bug59219Servlet bug59219Servlet = new Bug59219Servlet();
+        Wrapper w = tomcat.addServlet("", "async", bug59219Servlet);
         w.setAsyncSupported(true);
         ctx.addServletMappingDecoded("/async", "async");
 
@@ -1861,6 +1905,7 @@ public class TestAsyncContextImpl extends TomcatBaseTest {
 
         private static final long serialVersionUID = 1L;
 
+        private final transient TrackingListener trackingListener = new TrackingListener(true, false, "/async");
         @Override
         protected void doGet(HttpServletRequest req, HttpServletResponse resp)
                 throws ServletException, IOException {
@@ -1868,7 +1913,7 @@ public class TestAsyncContextImpl extends TomcatBaseTest {
             track("doGet-");
             AsyncContext ctx = req.startAsync();
             ctx.setTimeout(3000);
-            ctx.addListener(new TrackingListener(true, false, "/async"));
+            ctx.addListener(trackingListener);
 
             String loopsParam = req.getParameter("loops");
             Integer loopsAttr = (Integer) req.getAttribute("loops");
@@ -1887,7 +1932,6 @@ public class TestAsyncContextImpl extends TomcatBaseTest {
             } else
                 throw new ServletException();
         }
-
     }
 
     @Test
@@ -2653,4 +2697,309 @@ public class TestAsyncContextImpl extends TomcatBaseTest {
         }
 
     }
+
+
+    @Test
+    public void testAsyncIoEnd00() throws Exception {
+        doTestAsyncIoEnd(false, false);
+    }
+
+
+    @Test
+    public void testAsyncIoEnd01() throws Exception {
+        doTestAsyncIoEnd(false, true);
+    }
+
+
+    @Test
+    public void testAsyncIoEnd02() throws Exception {
+        doTestAsyncIoEnd(true, false);
+    }
+
+
+    @Test
+    public void testAsyncIoEnd03() throws Exception {
+        doTestAsyncIoEnd(true, true);
+    }
+
+
+    private void doTestAsyncIoEnd(boolean useThread, boolean useComplete) throws Exception {
+        Tomcat tomcat = getTomcatInstance();
+
+        // No file system docBase required
+        Context ctx = tomcat.addContext("", null);
+
+        AsyncIoEndServlet asyncIoEndServlet = new AsyncIoEndServlet(useThread, useComplete);
+        Wrapper wrapper = Tomcat.addServlet(ctx, "asyncIoEndServlet", asyncIoEndServlet);
+        wrapper.setAsyncSupported(true);
+        ctx.addServletMappingDecoded("/asyncIoEndServlet", "asyncIoEndServlet");
+
+        SimpleServlet simpleServlet = new SimpleServlet();
+        Tomcat.addServlet(ctx, "simpleServlet", simpleServlet);
+        ctx.addServletMappingDecoded("/simpleServlet", "simpleServlet");
+
+        tomcat.start();
+
+        ByteChunk body = new ByteChunk();
+        int rc = getUrl("http://localhost:" + getPort() + "/asyncIoEndServlet", body, null);
+
+        Assert.assertEquals(HttpServletResponse.SC_OK, rc);
+        Assert.assertEquals("OK", body.toString());
+
+        Assert.assertFalse(asyncIoEndServlet.getInvalidStateDetected());
+    }
+
+
+    private static class AsyncIoEndServlet extends HttpServlet {
+
+        private static final long serialVersionUID = 1L;
+
+        private final boolean useThread;
+        private final boolean useComplete;
+        private transient AsyncIoEndWriteListener asyncIoEndWriteListener;
+
+        public AsyncIoEndServlet(boolean useThread, boolean useComplete) {
+            this.useThread = useThread;
+            this.useComplete = useComplete;
+        }
+
+        @Override
+        protected void doGet(HttpServletRequest req, HttpServletResponse resp)
+                throws ServletException, IOException {
+
+            if (useComplete) {
+                // Write expected body here
+                resp.setContentType("text/plain");
+                resp.setCharacterEncoding("UTF-8");
+                resp.getOutputStream().write("OK".getBytes(StandardCharsets.UTF_8));
+            }
+            AsyncContext ac = req.startAsync();
+            ServletOutputStream sos = resp.getOutputStream();
+            asyncIoEndWriteListener = new AsyncIoEndWriteListener(ac, useThread, useComplete);
+            sos.setWriteListener(asyncIoEndWriteListener);
+        }
+
+        public boolean getInvalidStateDetected() {
+            if (asyncIoEndWriteListener != null) {
+                return asyncIoEndWriteListener.getInvalidStateDetected();
+            }
+            return false;
+        }
+    }
+
+
+    private static class AsyncIoEndWriteListener implements WriteListener {
+
+        private final AsyncContext ac;
+        private final boolean useThread;
+        private final boolean useComplete;
+        private boolean invalidStateDetected = false;
+
+        public AsyncIoEndWriteListener(AsyncContext ac, boolean useThread,
+                boolean useComplete) {
+            this.ac = ac;
+            this.useThread = useThread;
+            this.useComplete = useComplete;
+        }
+
+
+        @Override
+        public void onWritePossible() throws IOException {
+            if (useThread) {
+                (new Thread() {
+                    @Override
+                    public void run() {
+                        doOnWritePossible();
+                    }
+                }).start();
+            } else {
+                doOnWritePossible();
+            }
+        }
+
+
+        public void doOnWritePossible() {
+            // Hack to avoid ISE if we try gettign the request after complete/dispatch
+            ServletRequest req = ac.getRequest();
+            if (useComplete) {
+                ac.complete();
+            } else {
+                ac.dispatch("/simpleServlet");
+            }
+            if (req.isAsyncStarted()) {
+                invalidStateDetected = true;
+            }
+        }
+
+        @Override
+        public void onError(Throwable throwable) {
+            throw new RuntimeException(throwable);
+        }
+
+
+        public boolean getInvalidStateDetected() {
+            return invalidStateDetected;
+        }
+    }
+
+
+    private static class SimpleServlet extends HttpServlet {
+
+        private static final long serialVersionUID = 1L;
+
+        @Override
+        protected void doGet(HttpServletRequest req, HttpServletResponse resp)
+                throws ServletException, IOException {
+
+            // Write expected body here
+            resp.setContentType("text/plain");
+            resp.setCharacterEncoding("UTF-8");
+            resp.getOutputStream().write("OK".getBytes(StandardCharsets.UTF_8));
+        }
+    }
+
+
+    /*
+     * Tests an error on an async thread before the container thread that called
+     * startAsync() has returned to the container.
+     *
+     * Required sequence is:
+     * - enter Servlet's service() method
+     * - startAsync()
+     * - start async thread
+     * - close client connection
+     * - write on async thread -> I/O error
+     * - exit Servlet's service() method
+     *
+     * This test makes extensive use of instance fields in the Servlet that
+     * would normally be considered very poor practice. It is only safe in this
+     * test as the Servlet only processes a single request.
+     */
+    @Test
+    public void testBug63816() throws Exception {
+        CountDownLatch doGetLatch = new CountDownLatch(1);
+        CountDownLatch clientCloseLatch = new CountDownLatch(1);
+        CountDownLatch threadCompleteLatch = new CountDownLatch(1);
+
+        AtomicBoolean ise = new AtomicBoolean(true);
+
+        // Setup Tomcat instance
+        Tomcat tomcat = getTomcatInstance();
+
+        // No file system docBase required
+        Context ctx = tomcat.addContext("", null);
+
+        Bug63816Servlet bug63816Servlet = new Bug63816Servlet(doGetLatch, clientCloseLatch, threadCompleteLatch, ise);
+        Wrapper wrapper = Tomcat.addServlet(ctx, "bug63816Servlet", bug63816Servlet);
+        wrapper.setAsyncSupported(true);
+        ctx.addServletMappingDecoded("/*", "bug63816Servlet");
+
+        tomcat.start();
+
+        Bug63816Client client = new Bug63816Client();
+        client.setPort(getPort());
+        client.setRequest(new String[] { "GET / HTTP/1.1" + SimpleHttpClient.CRLF +
+                                         "Host: localhost:" + SimpleHttpClient.CRLF +
+                                         SimpleHttpClient.CRLF});
+        client.connect();
+        client.sendRequest();
+
+        // Wait for async to start
+        doGetLatch.await();
+
+        client.disconnect();
+
+        clientCloseLatch.countDown();
+
+        threadCompleteLatch.await();
+
+        Assert.assertFalse(ise.get());
+    }
+
+
+    private static final class Bug63816Client extends SimpleHttpClient {
+
+        @Override
+        public boolean isResponseBodyOK() {
+            return true;
+        }
+    }
+
+
+    private static final class Bug63816Servlet extends HttpServlet {
+
+        private static final long serialVersionUID = 1L;
+
+        private final transient CountDownLatch doGetLatch;
+        private final transient CountDownLatch clientCloseLatch;
+        private final transient CountDownLatch threadCompleteLatch;
+        private final AtomicBoolean ise;
+
+        public Bug63816Servlet(CountDownLatch doGetLatch, CountDownLatch clientCloseLatch,
+                CountDownLatch threadCompleteLatch, AtomicBoolean ise) {
+            this.doGetLatch = doGetLatch;
+            this.clientCloseLatch = clientCloseLatch;
+            this.threadCompleteLatch = threadCompleteLatch;
+            this.ise = ise;
+        }
+
+        @Override
+        protected void doGet(HttpServletRequest req, HttpServletResponse resp)
+                throws ServletException, IOException {
+
+            doGetLatch.countDown();
+
+            AsyncContext ac = req.startAsync();
+            Thread t = new Bug63816Thread(ac, clientCloseLatch, threadCompleteLatch, ise);
+            t.start();
+
+            try {
+                threadCompleteLatch.await();
+            } catch (InterruptedException e) {
+                // Ignore
+            }
+        }
+    }
+
+
+    private static final class Bug63816Thread extends Thread {
+
+        private final AsyncContext ac;
+        private final CountDownLatch clientCloseLatch;
+        private final CountDownLatch threadCompleteLatch;
+        private final AtomicBoolean ise;
+
+        public Bug63816Thread(AsyncContext ac, CountDownLatch clientCloseLatch, CountDownLatch threadCompleteLatch,
+                AtomicBoolean ise) {
+            this.ac = ac;
+            this.clientCloseLatch = clientCloseLatch;
+            this.threadCompleteLatch = threadCompleteLatch;
+            this.ise = ise;
+        }
+
+        @Override
+        public void run() {
+            try {
+                // Wait for client to close connection
+                clientCloseLatch.await();
+
+                try {
+                    ServletResponse resp = ac.getResponse();
+                    resp.setContentType("text/plain");
+                    for (int i = 0; i < 4; i++) {
+                        resp.getWriter().write(TestCoyoteAdapter.TEXT_8K);
+                        resp.flushBuffer();
+                    }
+                } catch (IOException e) {
+                    // Ignore
+                }
+                ise.set(false);
+            } catch (InterruptedException e) {
+                // Ignore
+            } finally {
+                threadCompleteLatch.countDown();
+            }
+        }
+    }
+
 }

@@ -101,9 +101,9 @@ public abstract class Compiler {
     /**
      * Compile the jsp file into equivalent servlet in .java file
      *
-     * @throws Exception Error generating Java source
-     *
      * @return A map of class names to JSR 045 source maps
+     *
+     * @throws Exception Error generating Java source
      */
     protected Map<String,SmapStratum> generateJava() throws Exception {
 
@@ -382,9 +382,9 @@ public abstract class Compiler {
         }
 
         try {
+            final Long jspLastModified = ctxt.getLastModified(ctxt.getJspFile());
             Map<String,SmapStratum> smaps = generateJava();
             File javaFile = new File(ctxt.getServletJavaFileName());
-            Long jspLastModified = ctxt.getLastModified(ctxt.getJspFile());
             if (!javaFile.setLastModified(jspLastModified.longValue())) {
                 throw new JasperException(Localizer.getMessage("jsp.error.setLastModified", javaFile));
             }

@@ -82,7 +82,9 @@ public class JspCompilationContext {
 
     private volatile boolean removed = false;
 
-    private URLClassLoader jspLoader;
+    // volatile so changes are visible when multiple threads request a JSP file
+    // that has been modified
+    private volatile URLClassLoader jspLoader;
     private URL baseUrl;
     private Class<?> servletClass;
 
@@ -454,11 +456,11 @@ public class JspCompilationContext {
         if (isTagFile()) {
             String className = tagInfo.getTagClassName();
             int lastIndex = className.lastIndexOf('.');
-            String pkgName = "";
+            String packageName = "";
             if (lastIndex != -1) {
-                pkgName = className.substring(0, lastIndex);
+                packageName = className.substring(0, lastIndex);
             }
-            return pkgName;
+            return packageName;
         } else {
             String dPackageName = getDerivedPackageName();
             if (dPackageName.length() == 0) {
@@ -767,4 +769,3 @@ public class JspCompilationContext {
         return result.toString();
     }
 }
-
