@@ -1,0 +1,4 @@
+mvn install:install-file -Dfile=output/embed/tomcat-embed-core.jar -Dsources=output/embed-src-jars/tomcat-embed-core-src.jar -DgroupId=org.apache.tomcat.embed -DartifactId=tomcat-embed-core -Dversion="$1" -Dpackaging=jar -Dclassifier=loom
+mvn install:install-file -Dfile=output/embed/tomcat-embed-el.jar -Dsources=output/embed-src-jars/tomcat-embed-el-src.jar -DgroupId=org.apache.tomcat.embed -DartifactId=tomcat-embed-el -Dversion="$1" -Dpackaging=jar -Dclassifier=loom
+mvn install:install-file -Dfile=output/embed/tomcat-embed-jasper.jar -Dsources=output/embed-src-jars/tomcat-embed-jasper-src.jar -DgroupId=org.apache.tomcat.embed -DartifactId=tomcat-embed-jasper -Dversion="$1" -Dpackaging=jar -Dclassifier=loom
+mvn install:install-file -Dfile=output/embed/tomcat-embed-websocket.jar -Dsources=output/embed-src-jars/tomcat-embed-websocket-src.jar -DgroupId=org.apache.tomcat.embed -DartifactId=tomcat-embed-websocket -Dversion="$1" -Dpackaging=jar -Dclassifier=loom

@@ -16,15 +16,15 @@
  */
 package org.apache.tomcat.util.net;
 
+import org.apache.tomcat.util.collections.ManagedConcurrentWeakHashMap;
+
 import java.util.Objects;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
 public abstract class SocketProcessorBase<S> implements Runnable {
 
-    private static final ConcurrentMap<SocketWrapperBase<?>, Lock> LOCK_CACHE = new ConcurrentHashMap<>();
+    private static final ConcurrentMap<SocketWrapperBase<?>, ReentrantLock> LOCK_CACHE = new ManagedConcurrentWeakHashMap<>();
 
     protected SocketWrapperBase<S> socketWrapper;
     protected SocketEvent event;
@@ -43,20 +43,13 @@ public abstract class SocketProcessorBase<S> implements Runnable {
 
     @Override
     public final void run() {
-        // doRun's finally block set this socketWrapper to null, so storing reference locally to be able to clean lock
-        // cache in this method's finally block
-        SocketWrapperBase<?> socketWrapperLocal = socketWrapper;
-        Lock lock = LOCK_CACHE.computeIfAbsent(socketWrapper, (socketWrapperBase -> new ReentrantLock()));
-        lock.lock();
-        try {
+
+        withLock(socketWrapper, () -> {
             if (socketWrapper.isClosed()) {
                 return;
             }
             doRun();
-        } finally {
-            lock.unlock();
-            LOCK_CACHE.remove(socketWrapperLocal, lock);
-        }
+        });
 
         /*
         synchronized (socketWrapper) {
@@ -71,6 +64,16 @@ public abstract class SocketProcessorBase<S> implements Runnable {
             doRun();
         }
          */
+    }
+
+    private void withLock(SocketWrapperBase<?> monitor, Runnable action) {
+        ReentrantLock lck = LOCK_CACHE.computeIfAbsent(monitor, key -> new ReentrantLock());
+        lck.lock();
+        try {
+            action.run();
+        } finally {
+            lck.unlock();
+        }
     }
 
 
