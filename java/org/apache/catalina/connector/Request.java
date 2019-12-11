@@ -105,10 +105,10 @@ import org.apache.tomcat.util.http.Parameters.FailReason;
 import org.apache.tomcat.util.http.ServerCookie;
 import org.apache.tomcat.util.http.ServerCookies;
 import org.apache.tomcat.util.http.fileupload.FileItem;
-import org.apache.tomcat.util.http.fileupload.FileUploadBase;
-import org.apache.tomcat.util.http.fileupload.FileUploadBase.InvalidContentTypeException;
 import org.apache.tomcat.util.http.fileupload.FileUploadException;
 import org.apache.tomcat.util.http.fileupload.disk.DiskFileItemFactory;
+import org.apache.tomcat.util.http.fileupload.impl.InvalidContentTypeException;
+import org.apache.tomcat.util.http.fileupload.impl.SizeException;
 import org.apache.tomcat.util.http.fileupload.servlet.ServletFileUpload;
 import org.apache.tomcat.util.http.fileupload.servlet.ServletRequestContext;
 import org.apache.tomcat.util.http.parser.AcceptLanguage;
@@ -2658,13 +2658,6 @@ public class Request implements HttpServletRequest {
     }
 
 
-    /**
-     * Changes the session ID of the session associated with this request.
-     *
-     * @return the old session ID before it was changed
-     * @see javax.servlet.http.HttpSessionIdListener
-     * @since Servlet 3.1
-     */
     @Override
     public String changeSessionId() {
 
@@ -2675,9 +2668,8 @@ public class Request implements HttpServletRequest {
         }
 
         Manager manager = this.getContext().getManager();
-        manager.changeSessionId(session);
 
-        String newSessionId = session.getId();
+        String newSessionId = manager.rotateSessionId(session);
         this.changeSessionId(newSessionId);
 
         return newSessionId;
@@ -2906,7 +2898,7 @@ public class Request implements HttpServletRequest {
             } catch (InvalidContentTypeException e) {
                 parameters.setParseFailedReason(FailReason.INVALID_CONTENT_TYPE);
                 partsParseException = new ServletException(e);
-            } catch (FileUploadBase.SizeException e) {
+            } catch (SizeException e) {
                 parameters.setParseFailedReason(FailReason.POST_TOO_LARGE);
                 checkSwallowInput();
                 partsParseException = new IllegalStateException(e);

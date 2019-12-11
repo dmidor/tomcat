@@ -44,14 +44,235 @@
   They eventually become mixed with the numbered issues (i.e., numbered
   issues do not "pop up" wrt. others).
 -->
-<section name="Tomcat 9.0.30 (markt)" rtext="in development">
+<section name="Tomcat 9.0.31 (markt)" rtext="in development">
+  <subsection name="Catalina">
+    <changelog>
+      <update>
+        Do not store username and password as session notes during
+        authentication if they are not needed. (kkolinko)
+      </update>
+    </changelog>
+  </subsection>
+  <subsection name="Coyote">
+    <changelog>
+      <update>
+        Simplify NIO blocking read and write. (remm)
+      </update>
+      <fix>
+        Ensure that Servlet Asynchronous processing timeouts fire when requests
+        are made using HTTP/2. (markt)
+      </fix>
+    </changelog>
+  </subsection>
+  <subsection name="Other">
+    <changelog>
+      <fix>
+        <bug>63995</bug>: Ensure statements are closed when a pooled JDBC
+        connection is passivated in Tomcat's fork of Commons DBCP2. (markt)
+      </fix>
+    </changelog>
+  </subsection>
 </section>
-<section name="Tomcat 9.0.29 (markt)" rtext="release in progress">
+<section name="Tomcat 9.0.30 (markt)" rtext="release in progress">
+  <subsection name="Catalina">
+    <changelog>
+      <add>
+        <bug>63681</bug>: Introduce RealmBase#authenticate(GSSName, GSSCredential)
+        and friends. (michaelo)
+      </add>
+      <fix>
+        <bug>63964</bug>: Correct a regression in the static resource caching
+        changes introduced in 9.0.28. URLs constructed from URLs obtained from
+        the cache could not be used to access resources. (markt)
+      </fix>
+      <fix>
+        <bug>63970</bug>: Correct a regression in the static resource caching
+        changes introduced in 9.0.28. Connections to URLs obtained for JAR
+        resources could not be cast to <code>JarURLConnection</code>. (markt)
+      </fix>
+      <add>
+        <bug>63937</bug>: Add a new attribute to the standard
+        <code>Authenticator</code> implementations,
+        <code>allowCorsPreflight</code>, that allows the
+        <code>Authenticator</code>s to be configured to allow CORS preflight
+        requests to bypass authentication as required by the CORS specification.
+        (markt)
+      </add>
+      <fix>
+        <bug>63939</bug>: Correct the same origin check in the CORS filter. An
+        origin with an explicit default port is now considered to be the same as
+        an origin without a default port and origins are now compared in a
+        case-sensitive manner as required by the CORS specification. (markt)
+      </fix>
+      <fix>
+        <bug>63981</bug>: Allow multiple calls to
+        <code>Registry.disableRegistry()</code> without the second and
+        subsequent calls triggering the logging of a warning. Based on a patch
+        by Andy Wilkinson. (markt)
+      </fix>
+      <fix>
+        <bug>63982</bug>: CombinedRealm makes assumptions about principal implementation
+        (michaelo)
+      </fix>
+      <fix>
+        <bug>63983</bug>: Correct a regression in the static resource caching
+        changes introduced in 9.0.28. A large number of file descriptors were
+        opened that could reach the OS limit before being released by GC.
+        (markt)
+      </fix>
+      <update>
+        <bug>63987</bug>: Deprecate <code>Realm.getRoles(Principal)</code>. (michaelo)
+      </update>
+      <scode>
+        Add a unit test for the session <code>FileStore</code> implementation
+        and refactor loops in <code>FileStore</code> to use the ForEach style.
+        Pull request provided by Govinda Sakhare. (markt)
+      </scode>
+      <update>
+        Moved server-side include (SSI) module into a separate JAR library. (schultz)
+      </update>
+      <fix>
+        Refactor FORM authentication to reduce duplicate code and to ensure that
+        the authenticated Principal is not cached in the session when caching is
+        disabled. (markt)
+      </fix>
+    </changelog>
+  </subsection>
+  <subsection name="Coyote">
+    <changelog>
+      <fix>
+        Fix endpoint closeSocket and destroySocket discrepancies, in particular
+        in the APR connector. (remm)
+      </fix>
+      <fix>
+        Harmonize maxConnections default value to 8192 across all connectors.
+        (remm)
+      </fix>
+      <fix>
+        <bug>63931</bug>: Improve timeout handling for asyncIO to ensure that
+        blocking operations see a <code>SocketTimeoutException</code> if one
+        occurs. (remm/markt)
+      </fix>
+      <fix>
+        <bug>63932</bug>: By default, do not compress content that has a strong
+        ETag. This behaviour is configuration for the HTTP/1.1 and HTTP/2
+        connectors via the new Connector attribute
+        <code>noCompressionStrongETag</code>. (markt)
+      </fix>
+      <fix>
+        <bug>63949</bug>: Fix non blocking write problems with NIO due to the
+        need for a write loop. (remm)
+      </fix>
+      <fix>
+        Simplify regular endpoint writes by removing write(Non)BlockingDirect.
+        All regular writes will now be buffered for a more predictable
+        behavior. (remm)
+      </fix>
+      <fix>
+        Send an exception directly to the completion handler when a timeout
+        exception occurs for the operation, and add a boolean to make sure the
+        completion handler is called only once. (remm/markt)
+      </fix>
+    </changelog>
+  </subsection>
+  <subsection name="WebSocket">
+    <changelog>
+      <fix>
+        Ensure a couple of very unlikely concurrency issues are avoided when
+        writing WebSocket messages. (markt)
+      </fix>
+    </changelog>
+  </subsection>
+  <subsection name="Web applications">
+    <changelog>
+      <fix>
+        Fix the broken re-try link on the error page for the FORM authentication
+        example in the JSP section of the examples web application. (markt)
+      </fix>
+      <add>
+        Improvements to CsrfPreventionFilter: additional logging, allow the
+        CSRF nonce request parameter name to be customized.
+        (schultz)
+      </add>
+      <fix>
+        Correct the documentation for the <code>maxConnections</code> attribute
+        of the <code>Connector</code> in the documentation web application.
+        (markt)
+      </fix>
+      <add>
+        Add the ability to set and display session attributes in the JSP FORM
+        authentication example to demonstrate session persistence across
+        restarts for authenticated sessions. (markt)
+      </add>
+    </changelog>
+  </subsection>
+  <subsection name="Other">
+    <changelog>
+      <fix>
+        Correct the fix for <bug>63815</bug> (quoting the use of
+        <code>CATALINA_OPTS</code> and <code>JAVA_OPTS</code> when used in shell
+        scripts to avoid the expansion of <code>*</code>) as it caused various
+        regressions, particularly with <code>daemon.sh</code>. (markt)
+      </fix>
+      <update>
+        Update the OWB module to Apache OpenWebBeans 2.0.13. (remm)
+      </update>
+      <update>
+        Support Java 11 in Graal Native Images with Graal 19.3+. (remm)
+      </update>
+      <add>
+        Expand the search made by the Windows installer for a suitable Java
+        installation to include the 64-bit JDK registry entries and the
+        <code>JAVA_HOME</code> environment variable. Pull request provided by
+        Alexander Norz. (markt)
+      </add>
+      <add>
+        Expand the coverage of the Korean translations provided with Apache
+        Tomcat. (woonsan)
+      </add>
+      <add>
+        Expand the coverage of the French translations provided with Apache
+        Tomcat. (remm)
+      </add>
+      <add>
+        Expand the coverage of the Chinese translations provided with Apache
+        Tomcat. Contributions provided by lins and 磊. (markt)
+      </add>
+      <add>
+        Update the internal fork of Apache Commons BCEL to ff6941e (2019-12-06,
+        6.4.2-dev). Code clean-up only. (markt)
+      </add>
+      <add>
+        Update the internal fork of Apache Commons Codec to 9637dd4 (2019-12-06,
+        1.14-SNAPSHOT). Code clean-up and a fix for CODEC-265. (markt)
+      </add>
+      <add>
+        Update the internal fork of Apache Commons FileUpload to 2317552
+        (2019-12-06, 2.0-SNAPSHOT). Refactoring. (markt)
+      </add>
+      <add>
+        Update the internal fork of Apache Commons Pool 2 to 6092f92 (2019-12-06,
+        2.8.0-SNAPSHOT). Clean-up and minor refactoring. (markt)
+      </add>
+      <add>
+        Update the internal fork of Apache Commons DBCP 2 to a36390 (2019-12-06,
+        2.7.1-SNAPSHOT). Minor refactoring. (markt)
+      </add>
+    </changelog>
+  </subsection>
+</section>
+<section name="Tomcat 9.0.29 (markt)" rtext="2019-11-21">
   <subsection name="Catalina">
     <changelog>
       <fix>
        Refactor JMX remote RMI registry creation. (remm)
       </fix>
+      <add>
+        Improvement to CsrfPreventionFilter: expose the latest available nonce
+        as a request attribute; expose the expected nonce request parameter
+        name as a context attribute.
+        (schultz)
+      </add>
     </changelog>
   </subsection>
   <subsection name="Coyote">
@@ -177,10 +398,11 @@
         Improve cleanup after errors when setting socket options. (remm)
       </fix>
       <fix>
-        Do not perform a blocking read after a <code>CPING</code> message is
-        received by the AJP connector because, if the JK Connector is configured
-        with <code>ping_mode=&quot;I&quot;</code>, the <code>CPING</code>
-        message will not always be followed by the start of a request. (markt)
+        <bug>63859</bug>: Do not perform a blocking read after a
+        <code>CPING</code> message is received by the AJP connector because, if
+        the JK Connector is configured with
+        <code>ping_mode=&quot;I&quot;</code>, the <code>CPING</code> message
+        will not always be followed by the start of a request. (markt)
       </fix>
       <fix>
         Properly calculate all dynamic parts of the ErrorReportValve response
@@ -236,7 +458,7 @@
         <bug>63826</bug>: Remove <code>commons-daemon-native.tar.gz</code> and
         <code>tomcat-native.tar.gz</code> from the binary zip distributions for
         Windows since compiled versions of those components are already
-        included within the zip distriubutions. (markt)
+        included within the zip distributions. (markt)
       </fix>
       <fix>
         <bug>63838</bug>: Suppress reflexive access warnings when running the
@@ -536,7 +758,7 @@
       </fix>
       <fix>
         When performing a silent install with the Windows Installer, ensure that
-        the registry entires are added to the 64-bit registry when using a
+        the registry entries are added to the 64-bit registry when using a
         64-bit JVM. (markt)
       </fix>
       <fix>

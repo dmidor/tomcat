@@ -279,6 +279,16 @@ public abstract class AbstractHttp11Protocol<S> extends AbstractProtocol<S> {
     }
 
 
+    @Deprecated
+    public boolean getNoCompressionStrongETag() {
+        return compressionConfig.getNoCompressionStrongETag();
+    }
+    @Deprecated
+    public void setNoCompressionStrongETag(boolean noCompressionStrongETag) {
+        compressionConfig.setNoCompressionStrongETag(noCompressionStrongETag);
+    }
+
+
     public boolean useCompression(Request request, Response response) {
         return compressionConfig.useCompression(request, response);
     }
@@ -488,6 +498,8 @@ public abstract class AbstractHttp11Protocol<S> extends AbstractProtocol<S> {
                 }
             }
         }
+
+        upgradeProtocol.setHttp11Protocol(this);
     }
     @Override
     public UpgradeProtocol getNegotiatedProtocol(String negotiatedName) {

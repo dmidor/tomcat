@@ -35,9 +35,9 @@
   <section name="Introduction">
 
   <p>
-    Tomcat supports using the GraalVM Native Image tool to produce a native
-    binary including the container. This documentation page describes the
-    build process of such an image.
+    Tomcat supports using the GraalVM 19.3 Native Image tool to produce
+    a native binary including the container. This documentation page
+    describes the build process of such an image.
   </p>
 
   </section>
@@ -57,7 +57,7 @@
   <p>
     Download and install GraalVM. The first step is then to add the
     native-image tool.
-    <source>export JAVA_HOME=/absolute...path...to/graalvm-ce-x.y.z
+    <source>export JAVA_HOME=/absolute...path...to/graalvm-ce-javaX-x.y.z
 cd $JAVA_HOME/bin
 ./gu install native-image</source>
     Download the Tomcat Maven packaging from
@@ -103,7 +103,7 @@ ant -Dwebapp.name=somewebapp -f graal-webapp.ant.xml</source>
   <p>
     Run the GraalVM substrate VM using the trace agent:
     <source>$JAVA_HOME/bin/java\
-        -agentlib:native-image-agent=trace-output=$TOMCAT_MAVEN/target/trace-file.json\
+        -agentlib:native-image-agent=config-output-dir=$TOMCAT_MAVEN/target/\
         -Dcatalina.base=. -Djava.util.logging.config.file=conf/logging.properties\
         -jar target/tomcat-maven-1.0.jar</source>
   </p>
@@ -117,11 +117,7 @@ ant -Dwebapp.name=somewebapp -f graal-webapp.ant.xml</source>
   </p>
 
   <p>
-    Once that is done, the VM may be shut down. The descriptors can now be
-    generated from the trace file.
-    <source>$JAVA_HOME/bin/native-image-configure generate\
-        --trace-input=$TOMCAT_MAVEN/target/trace-file.json\
-        --output-dir=$TOMCAT_MAVEN/target</source>
+    The descriptors have now been generated in the agent output directory.
     At this point, further configuration must be made to add items that are
     not traced, including: base interfaces, resource bundles, BeanInfo based
     reflection, etc. Please refer to the Graal documentation for more
@@ -139,18 +135,19 @@ ant -Dwebapp.name=somewebapp -f graal-webapp.ant.xml</source>
         --allow-incomplete-classpath --enable-https\
         --initialize-at-build-time=org.eclipse.jdt,org.apache.el.parser.SimpleNode,javax.servlet.jsp.JspFactory,org.apache.jasper.servlet.JasperInitializer,org.apache.jasper.runtime.JspFactoryImpl\
         -H:+JNI -H:+ReportUnsupportedElementsAtRuntime\
-        -H:+ReportExceptionStackTraces -H:EnableURLProtocols=http,https,jar\
+        -H:+ReportExceptionStackTraces -H:EnableURLProtocols=http,https,jar,jrt\
         -H:ConfigurationFileDirectories=$TOMCAT_MAVEN/target/\
         -H:ReflectionConfigurationFiles=$TOMCAT_MAVEN/tomcat-reflection.json\
         -H:ResourceConfigurationFiles=$TOMCAT_MAVEN/tomcat-resource.json\
         -H:JNIConfigurationFiles=$TOMCAT_MAVEN/tomcat-jni.json\
         -jar $TOMCAT_MAVEN/target/tomcat-maven-1.0.jar</source>
+    The additional <code>--static</code> parameter enables static linking of
+    glibc, zlib and libstd++ in the generated binary.
   </p>
 
   <p>
     Running the native image is then:
-    <source>./tomcat-maven-1.0 -Djava.library.path=$JAVA_HOME/jre/lib/amd64\
-        -Dcatalina.base=. -Djava.util.logging.config.file=conf/logging.properties</source>
+    <source>./tomcat-maven-1.0 -Dcatalina.base=. -Djava.util.logging.config.file=conf/logging.properties</source>
   </p>
 
   </section>
@@ -179,13 +176,14 @@ ant -Dwebapp.name=somewebapp -f graal-webapp.ant.xml</source>
   <p>
     Missing items for better Tomcat functionality:
     <ul>
-      <li>Java 11: ALPN for TLS, TLS 1.3, etc</li>
-      <li>BeanInfo support: BeanInfo use in JSP taglibs must be configured
-        manually in descriptors</li>
-      <li>Java serialization: Clustering, session persistence</li>
-      <li>Static linking configuration: JSSE elliptic curve support,
-        tomcat-native support when creating an image with static linking</li>
-      <li>JMX: Tomcat monitoring and management</li>
+      <li>Java serialization: Clustering and session persistence are not
+        functional</li>
+      <li>JMX: The usual monitoring and management is not usable</li>
+      <li>java.util.logging LogManager: Configuration through a system property
+        is not implemented, so standard java.util.logging must be used instead
+        of JULI</li>
+      <li>Static linking configuration: tomcat-native cannot be statically
+        linked</li>
     </ul>
   </p>
 

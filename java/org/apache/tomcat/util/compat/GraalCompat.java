@@ -18,7 +18,7 @@ package org.apache.tomcat.util.compat;
 
 import java.io.IOException;
 
-class GraalCompat extends JreCompat {
+class GraalCompat extends Jre9Compat {
 
     private static final boolean GRAAL;
 

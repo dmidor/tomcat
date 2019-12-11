@@ -189,9 +189,9 @@ public abstract class AbstractEndpoint<S,U> {
     private ObjectName oname = null;
 
     /**
-     * Map holding all current connections keyed with the sockets (for APR).
+     * Map holding all current connections keyed with the sockets.
      */
-    protected Map<S, SocketWrapperBase<S>> connections = new ConcurrentHashMap<>();
+    protected Map<U, SocketWrapperBase<S>> connections = new ConcurrentHashMap<>();
 
     /**
      * Get a set with the current open connections.
@@ -455,7 +455,7 @@ public abstract class AbstractEndpoint<S,U> {
     public int getAcceptorThreadPriority() { return acceptorThreadPriority; }
 
 
-    private int maxConnections = 10000;
+    private int maxConnections = 8*1024;
     public void setMaxConnections(int maxCon) {
         this.maxConnections = maxCon;
         LimitLatch latch = this.connectionLimitLatch;
@@ -470,8 +470,7 @@ public abstract class AbstractEndpoint<S,U> {
             initializeConnectionLatch();
         }
     }
-
-    public int  getMaxConnections() { return this.maxConnections; }
+    public int getMaxConnections() { return this.maxConnections; }
 
     /**
      * Return the current count of connections handled by this endpoint, if the
@@ -1355,14 +1354,24 @@ public abstract class AbstractEndpoint<S,U> {
 
     /**
      * Close the socket when the connection has to be immediately closed when
-     * an error occurs while configuring the accepted socket, allocating
-     * a wrapper for the socket, or trying to dispatch it for processing.
+     * an error occurs while configuring the accepted socket or trying to
+     * dispatch it for processing. The wrapper associated with the socket will
+     * be used for the close.
      * @param socket The newly accepted socket
      */
-    protected abstract void closeSocket(U socket);
-
-    protected void destroySocket(U socket) {
-        closeSocket(socket);
+    protected void closeSocket(U socket) {
+        SocketWrapperBase<S> socketWrapper = connections.get(socket);
+        if (socketWrapper != null) {
+            socketWrapper.close();
+        }
     }
+
+    /**
+     * Close the socket. This is used when the connector is not in a state
+     * which allows processing the socket, or if there was an error which
+     * prevented the allocation of the socket wrapper.
+     * @param socket The newly accepted socket
+     */
+    protected abstract void destroySocket(U socket);
 }
 

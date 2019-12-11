@@ -27,6 +27,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 
+import org.apache.coyote.AbstractProtocol;
 import org.apache.coyote.Adapter;
 import org.apache.coyote.CompressionConfig;
 import org.apache.coyote.Processor;
@@ -91,6 +92,8 @@ public class Http2Protocol implements UpgradeProtocol {
     private boolean useSendfile = true;
     // Compression
     private final CompressionConfig compressionConfig = new CompressionConfig();
+    // Reference to HTTP/1.1 protocol that this instance is configured under
+    private AbstractProtocol<?> http11Protocol = null;
 
     @Override
     public String getHttpUpgradeName(boolean isSSLEnabled) {
@@ -405,7 +408,26 @@ public class Http2Protocol implements UpgradeProtocol {
     }
 
 
+    @Deprecated
+    public boolean getNoCompressionStrongETag() {
+        return compressionConfig.getNoCompressionStrongETag();
+    }
+    @Deprecated
+    public void setNoCompressionStrongETag(boolean noCompressionStrongETag) {
+        compressionConfig.setNoCompressionStrongETag(noCompressionStrongETag);
+    }
+
+
     public boolean useCompression(Request request, Response response) {
         return compressionConfig.useCompression(request, response);
+    }
+
+
+    public AbstractProtocol<?> getHttp11Protocol() {
+        return this.http11Protocol;
+    }
+    @Override
+    public void setHttp11Protocol(AbstractProtocol<?> http11Protocol) {
+        this.http11Protocol = http11Protocol;
     }
 }

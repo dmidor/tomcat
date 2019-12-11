@@ -36,14 +36,14 @@ BCEL
 Sub-tree:
 src/main/java/org/apache/bcel
 The SHA1 ID for the most recent commit to be merged to Tomcat is:
-4b760bb53b57b704006a0a33f7ec187b7e7f5ebc (2019-08-01)
+ff6941e4491c68f6eaf270ff03c1bc1e554c7b42 (2019-12-06)
 
 Codec
 -----
 Sub-tree:
 src/main/java/org/apache/commons/codec
 The SHA1 ID for the most recent commit to be merged to Tomcat is:
-3ebef4ad92e31697fb52ca7cc71904c68654c2c8 (2019-08-01)
+9637dd44fa0e2d5a6ddb45791e3cd78298842d95 (2019-12-06)
 Note: Only classes required for Base64 encoding/decoding. The rest are removed.
 
 FileUpload
@@ -51,22 +51,22 @@ FileUpload
 Sub-tree:
 src/main/java/org/apache/commons/fileupload2
 The SHA1 ID for the most recent commit to be merged to Tomcat is:
-9958ea2426ec5682a7c929a13372c04426ee3818 (2019-08-01)
+2317552993fd5180a84083d599b8cbdb05a07bab (2019-12-06)
 
 Note: Tomcat's copy of fileupload also includes classes copied manually from
       Commons IO.
 
 DBCP
 ----
+Pool2
+Sub-tree
+src/main/java/org/apache/commons/pool2
+The SHA1 ID for the most recent commit to be merged to Tomcat is:
+6092f924b36061353ff92b18c88400ab3bc05327 (2019-12-06)
+
 DBCP2
 Sub-tree
 src/main/java/org/apache/commons/dbcp2
 src/main/resources/org/apache/commons/dbcp2
 The SHA1 ID for the most recent commit to be merged to Tomcat is:
-4813b7f5456c1f4fecc4f701ac731a71f57db249 (2019-08-09)
-
-Pool2
-Sub-tree
-src/main/java/org/apache/commons/pool2
-The SHA1 ID for the most recent commit to be merged to Tomcat is:
-796e32d53cc0d870ba0db3a7faf4c5b24ff76f3f (2019-08-01)
+a363906bf7a039f79c07fa3c68b082a69ae035d7 (2019-12-06)

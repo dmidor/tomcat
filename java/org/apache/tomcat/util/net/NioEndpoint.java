@@ -22,7 +22,6 @@ import java.io.FileInputStream;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
-import java.net.Socket;
 import java.net.SocketTimeoutException;
 import java.nio.ByteBuffer;
 import java.nio.channels.CancelledKeyException;
@@ -136,7 +135,7 @@ public class NioEndpoint extends AbstractJsseEndpoint<NioChannel,SocketChannel> 
     public boolean getUseInheritedChannel() { return useInheritedChannel; }
 
     /**
-     * Priority of the poller threads.
+     * Priority of the poller thread.
      */
     private int pollerThreadPriority = Thread.NORM_PRIORITY;
     public void setPollerThreadPriority(int pollerThreadPriority) { this.pollerThreadPriority = pollerThreadPriority; }
@@ -393,15 +392,10 @@ public class NioEndpoint extends AbstractJsseEndpoint<NioChannel,SocketChannel> 
      */
     @Override
     protected boolean setSocketOptions(SocketChannel socket) {
-        NioChannel channel = null;
-        boolean success = false;
-        // Process the connection
+        NioSocketWrapper socketWrapper = null;
         try {
-            // Disable blocking, polling will be used
-            socket.configureBlocking(false);
-            Socket sock = socket.socket();
-            socketProperties.setProperties(sock);
-
+            // Allocate channel and wrapper
+            NioChannel channel = null;
             if (nioChannels != null) {
                 channel = nioChannels.pop();
             }
@@ -416,15 +410,22 @@ public class NioEndpoint extends AbstractJsseEndpoint<NioChannel,SocketChannel> 
                     channel = new NioChannel(bufhandler);
                 }
             }
-            NioSocketWrapper socketWrapper = new NioSocketWrapper(channel, this);
-            connections.put(channel, socketWrapper);
-            channel.reset(socket, socketWrapper);
+            NioSocketWrapper newWrapper = new NioSocketWrapper(channel, this);
+            channel.reset(socket, newWrapper);
+            connections.put(socket, newWrapper);
+            socketWrapper = newWrapper;
+
+            // Set socket properties
+            // Disable blocking, polling will be used
+            socket.configureBlocking(false);
+            socketProperties.setProperties(socket.socket());
+
             socketWrapper.setReadTimeout(getConnectionTimeout());
             socketWrapper.setWriteTimeout(getConnectionTimeout());
             socketWrapper.setKeepAliveLeft(NioEndpoint.this.getMaxKeepAliveRequests());
             socketWrapper.setSecure(isSSLEnabled());
             poller.register(channel, socketWrapper);
-            success = true;
+            return true;
         } catch (Throwable t) {
             ExceptionUtils.handleThrowable(t);
             try {
@@ -432,19 +433,17 @@ public class NioEndpoint extends AbstractJsseEndpoint<NioChannel,SocketChannel> 
             } catch (Throwable tt) {
                 ExceptionUtils.handleThrowable(tt);
             }
-        } finally {
-            if (!success && channel != null) {
-                connections.remove(channel);
-                channel.free();
+            if (socketWrapper == null) {
+                destroySocket(socket);
             }
         }
         // Tell to close the socket if needed
-        return success;
+        return false;
     }
 
 
     @Override
-    protected void closeSocket(SocketChannel socket) {
+    protected void destroySocket(SocketChannel socket) {
         countDownConnection();
         try {
             socket.close();
@@ -774,6 +773,11 @@ public class NioEndpoint extends AbstractJsseEndpoint<NioChannel,SocketChannel> 
                                     if (!socketWrapper.readOperation.process()) {
                                         closeSocket = true;
                                     }
+                                } else if (socketWrapper.readBlocking) {
+                                    synchronized (socketWrapper.readLock) {
+                                        socketWrapper.readBlocking = false;
+                                        socketWrapper.readLock.notify();
+                                    }
                                 } else if (!processSocket(socketWrapper, SocketEvent.OPEN_READ, true)) {
                                     closeSocket = true;
                                 }
@@ -782,6 +786,11 @@ public class NioEndpoint extends AbstractJsseEndpoint<NioChannel,SocketChannel> 
                                 if (socketWrapper.writeOperation != null) {
                                     if (!socketWrapper.writeOperation.process()) {
                                         closeSocket = true;
+                                    }
+                                } else if (socketWrapper.writeBlocking) {
+                                    synchronized (socketWrapper.writeLock) {
+                                        socketWrapper.writeBlocking = false;
+                                        socketWrapper.writeLock.notify();
                                     }
                                 } else if (!processSocket(socketWrapper, SocketEvent.OPEN_WRITE, true)) {
                                     closeSocket = true;
@@ -1026,12 +1035,19 @@ public class NioEndpoint extends AbstractJsseEndpoint<NioChannel,SocketChannel> 
         private volatile long lastRead = System.currentTimeMillis();
         private volatile long lastWrite = lastRead;
 
+        private final Object readLock;
+        private volatile boolean readBlocking = false;
+        private final Object writeLock;
+        private volatile boolean writeBlocking = false;
+
         public NioSocketWrapper(NioChannel channel, NioEndpoint endpoint) {
             super(channel, endpoint);
             pool = endpoint.getSelectorPool();
             nioChannels = endpoint.getNioChannels();
             poller = endpoint.getPoller();
             socketBufferHandler = channel.getBufHandler();
+            readLock = (readPending == null) ? new Object() : readPending;
+            writeLock = (writePending == null) ? new Object() : writePending;
         }
 
         public Poller getPoller() { return poller; }
@@ -1170,6 +1186,7 @@ public class NioEndpoint extends AbstractJsseEndpoint<NioChannel,SocketChannel> 
                 log.debug("Calling [" + getEndpoint() + "].closeSocket([" + this + "])");
             }
             try {
+                getEndpoint().connections.remove(getSocket().getIOChannel());
                 synchronized (getSocket()) {
                     if (getSocket().isOpen()) {
                         getSocket().close(true);
@@ -1215,24 +1232,37 @@ public class NioEndpoint extends AbstractJsseEndpoint<NioChannel,SocketChannel> 
             if (socket instanceof ClosedNioChannel) {
                 throw new ClosedChannelException();
             }
-            if (block) {
-                Selector selector = null;
+            nRead = socket.read(to);
+            if (nRead == -1) {
+                throw new EOFException();
+            }
+            if (block && nRead == 0) {
+                long timeout = getReadTimeout();
                 try {
-                    selector = pool.get();
-                } catch (IOException x) {
-                    // Ignore
-                }
-                try {
-                    nRead = pool.read(to, socket, selector, getReadTimeout());
-                } finally {
-                    if (selector != null) {
-                        pool.put(selector);
+                    readBlocking = true;
+                    registerReadInterest();
+                    synchronized (readLock) {
+                        if (readBlocking) {
+                            try {
+                                if (timeout > 0) {
+                                    readLock.wait(timeout);
+                                } else {
+                                    readLock.wait();
+                                }
+                            } catch (InterruptedException e) {
+                                // Continue ...
+                            }
+                            if (readBlocking) {
+                                throw new SocketTimeoutException();
+                            }
+                        }
                     }
-                }
-            } else {
-                nRead = socket.read(to);
-                if (nRead == -1) {
-                    throw new EOFException();
+                    nRead = socket.read(to);
+                    if (nRead == -1) {
+                        throw new EOFException();
+                    }
+                } finally {
+                    readBlocking = false;
                 }
             }
             return nRead;
@@ -1246,36 +1276,50 @@ public class NioEndpoint extends AbstractJsseEndpoint<NioChannel,SocketChannel> 
                 throw new ClosedChannelException();
             }
             if (block) {
-                long writeTimeout = getWriteTimeout();
-                Selector selector = null;
+                long timeout = getWriteTimeout();
                 try {
-                    selector = pool.get();
-                } catch (IOException x) {
-                    // Ignore
-                }
-                try {
-                    pool.write(from, socket, selector, writeTimeout);
-                    if (block) {
-                        // Make sure we are flushed
-                        do {
-                            if (socket.flush(true, selector, writeTimeout)) {
-                                break;
+                    int n = 0;
+                    do {
+                        n = socket.write(from);
+                        if (n == -1) {
+                            throw new EOFException();
+                        }
+                        if (n == 0) {
+                            writeBlocking = true;
+                            registerWriteInterest();
+                            synchronized (writeLock) {
+                                if (writeBlocking) {
+                                    try {
+                                        if (timeout > 0) {
+                                            writeLock.wait(timeout);
+                                        } else {
+                                            writeLock.wait();
+                                        }
+                                    } catch (InterruptedException e) {
+                                        // Continue ...
+                                    }
+                                    if (writeBlocking) {
+                                        throw new SocketTimeoutException();
+                                    }
+                                }
                             }
-                        } while (true);
-                    }
+                        }
+                    } while (from.hasRemaining());
                 } finally {
-                    if (selector != null) {
-                        pool.put(selector);
-                    }
+                    writeBlocking = false;
                 }
                 // If there is data left in the buffer the socket will be registered for
                 // write further up the stack. This is to ensure the socket is only
                 // registered for write once as both container and user code can trigger
                 // write registration.
             } else {
-                if (socket.write(from) == -1) {
-                    throw new EOFException();
-                }
+                int n = 0;
+                do {
+                    n = socket.write(from);
+                    if (n == -1) {
+                        throw new EOFException();
+                    }
+                } while (n > 0 && from.hasRemaining());
             }
             updateLastWrite();
         }
@@ -1491,7 +1535,15 @@ public class NioEndpoint extends AbstractJsseEndpoint<NioChannel,SocketChannel> 
                                     }
                                 }
                                 if (doWrite) {
-                                    nBytes = getSocket().write(buffers, offset, length);
+                                    long n = 0;
+                                    do {
+                                        n = getSocket().write(buffers, offset, length);
+                                        if (n == -1) {
+                                            nBytes = n;
+                                        } else {
+                                            nBytes += n;
+                                        }
+                                    } while (n > 0);
                                     updateLastWrite();
                                 }
                             }

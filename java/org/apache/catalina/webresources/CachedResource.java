@@ -19,12 +19,14 @@ package org.apache.catalina.webresources;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.JarURLConnection;
 import java.net.MalformedURLException;
 import java.net.URL;
 import java.net.URLConnection;
 import java.net.URLStreamHandler;
 import java.security.Permission;
 import java.security.cert.Certificate;
+import java.util.jar.JarFile;
 import java.util.jar.Manifest;
 
 import org.apache.catalina.WebResource;
@@ -358,8 +360,11 @@ public class CachedResource implements WebResource {
             return null;
         }
         try {
-            return new URL(null, resourceURL.toExternalForm(),
-                    new CachedResourceURLStreamHandler(resourceURL, root, webAppPath, usesClassLoaderResources));
+            CachedResourceURLStreamHandler handler =
+                    new CachedResourceURLStreamHandler(resourceURL, root, webAppPath, usesClassLoaderResources);
+            URL result = new URL(null, resourceURL.toExternalForm(), handler);
+            handler.setAssociatedURL(result);
+            return result;
         } catch (MalformedURLException e) {
             log.error(sm.getString("cachedResource.invalidURL", resourceURL.toExternalForm()), e);
             return null;
@@ -413,6 +418,8 @@ public class CachedResource implements WebResource {
         private final String webAppPath;
         private final boolean usesClassLoaderResources;
 
+        private URL associatedURL = null;
+
         public CachedResourceURLStreamHandler(URL resourceURL, StandardRoot root, String webAppPath,
                 boolean usesClassLoaderResources) {
             this.resourceURL = resourceURL;
@@ -421,48 +428,64 @@ public class CachedResource implements WebResource {
             this.usesClassLoaderResources = usesClassLoaderResources;
         }
 
+        protected void setAssociatedURL(URL associatedURL) {
+            this.associatedURL = associatedURL;
+        }
+
         @Override
         protected URLConnection openConnection(URL u) throws IOException {
-            return new CachedResourceURLConnection(resourceURL, root, webAppPath, usesClassLoaderResources);
+            // This deliberately uses ==. If u isn't the URL object this
+            // URLStreamHandler was constructed for we do not want to use this
+            // URLStreamHandler to create a connection.
+            if (associatedURL != null && u == associatedURL) {
+                if ("jar".equals(associatedURL.getProtocol())) {
+                    return new CachedResourceJarURLConnection(resourceURL, root, webAppPath, usesClassLoaderResources);
+                } else {
+                    return new CachedResourceURLConnection(resourceURL, root, webAppPath, usesClassLoaderResources);
+                }
+            } else {
+                // The stream handler has been inherited by a URL that was
+                // constructed from a cache URL. We need to break that link.
+                URL constructedURL = new URL(u.toExternalForm());
+                return constructedURL.openConnection();
+            }
         }
     }
 
 
+    /*
+     * Keep this in sync with CachedResourceJarURLConnection.
+     */
     private static class CachedResourceURLConnection extends URLConnection {
 
         private final StandardRoot root;
         private final String webAppPath;
         private final boolean usesClassLoaderResources;
-        private final URLConnection resourceURLConnection;
-        private boolean connected;
+        private final URL resourceURL;
 
         protected CachedResourceURLConnection(URL resourceURL, StandardRoot root, String webAppPath,
-                boolean usesClassLoaderResources) throws IOException {
+                boolean usesClassLoaderResources) {
             super(resourceURL);
             this.root = root;
             this.webAppPath = webAppPath;
             this.usesClassLoaderResources = usesClassLoaderResources;
-            this.resourceURLConnection = url.openConnection();
+            this.resourceURL = resourceURL;
         }
 
         @Override
         public void connect() throws IOException {
-            if (!connected) {
-                resourceURLConnection.connect();
-                connected = true;
-            }
+            // NO-OP
         }
 
         @Override
         public InputStream getInputStream() throws IOException {
-            connect();
-            InputStream is = getResource().getInputStream();
-            return is;
+            return getResource().getInputStream();
         }
 
         @Override
         public Permission getPermission() throws IOException {
-            return resourceURLConnection.getPermission();
+            // Doesn't trigger a call to connect for file:// URLs
+            return resourceURL.openConnection().getPermission();
         }
 
         @Override
@@ -477,6 +500,62 @@ public class CachedResource implements WebResource {
 
         private WebResource getResource() {
             return root.getResource(webAppPath, false, usesClassLoaderResources);
+        }
+    }
+
+
+    /*
+     * Keep this in sync with CachedResourceURLConnection.
+     */
+    private static class CachedResourceJarURLConnection extends JarURLConnection {
+
+        private final StandardRoot root;
+        private final String webAppPath;
+        private final boolean usesClassLoaderResources;
+        private final URL resourceURL;
+
+        protected CachedResourceJarURLConnection(URL resourceURL, StandardRoot root, String webAppPath,
+                boolean usesClassLoaderResources) throws IOException {
+            super(resourceURL);
+            this.root = root;
+            this.webAppPath = webAppPath;
+            this.usesClassLoaderResources = usesClassLoaderResources;
+            this.resourceURL = resourceURL;
+        }
+
+        @Override
+        public void connect() throws IOException {
+            // NO-OP
+        }
+
+        @Override
+        public InputStream getInputStream() throws IOException {
+            return getResource().getInputStream();
+        }
+
+        @Override
+        public Permission getPermission() throws IOException {
+            // Doesn't trigger a call to connect for jar:// URLs
+            return resourceURL.openConnection().getPermission();
+        }
+
+        @Override
+        public long getLastModified() {
+            return getResource().getLastModified();
+        }
+
+        @Override
+        public long getContentLengthLong() {
+            return getResource().getContentLength();
+        }
+
+        private WebResource getResource() {
+            return root.getResource(webAppPath, false, usesClassLoaderResources);
+        }
+
+        @Override
+        public JarFile getJarFile() throws IOException {
+            return ((JarURLConnection) resourceURL.openConnection()).getJarFile();
         }
     }
 }
