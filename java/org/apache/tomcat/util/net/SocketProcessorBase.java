@@ -17,16 +17,20 @@
 package org.apache.tomcat.util.net;
 
 import java.util.Objects;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 
 public abstract class SocketProcessorBase<S> implements Runnable {
 
     protected SocketWrapperBase<S> socketWrapper;
+
     protected SocketEvent event;
+
+    protected final Lock lock = new ReentrantLock(true);
 
     public SocketProcessorBase(SocketWrapperBase<S> socketWrapper, SocketEvent event) {
         reset(socketWrapper, event);
     }
-
 
     public void reset(SocketWrapperBase<S> socketWrapper, SocketEvent event) {
         Objects.requireNonNull(event);
@@ -34,22 +38,18 @@ public abstract class SocketProcessorBase<S> implements Runnable {
         this.event = event;
     }
 
-
     @Override
     public final void run() {
-        synchronized (socketWrapper) {
-            // It is possible that processing may be triggered for read and
-            // write at the same time. The sync above makes sure that processing
-            // does not occur in parallel. The test below ensures that if the
-            // first event to be processed results in the socket being closed,
-            // the subsequent events are not processed.
+        lock.lock();
+        try {
             if (socketWrapper.isClosed()) {
                 return;
             }
             doRun();
+        } finally {
+            lock.unlock();
         }
     }
-
 
     protected abstract void doRun();
 }
